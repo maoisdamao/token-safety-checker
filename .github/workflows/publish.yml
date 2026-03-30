@@ -1,0 +1,30 @@
+name: Publish to ClawHub
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clawhub CLI
+        run: npm install -g clawhub
+
+      - name: Publish to ClawHub
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          clawhub publish . \
+            --slug token-safety-checker \
+            --name "Token Safety Checker" \
+            --version "$VERSION" \
+            --changelog "Release $VERSION"
