@@ -7,64 +7,96 @@ description: Scan openclaw.json for plaintext secrets (tokens, API keys, passwor
 
 Scan `openclaw.json` for plaintext secrets and migrate them to environment variables via SecretRef.
 
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/scan_tokens.py` | Detect plaintext secrets; output findings + shell info |
+| `scripts/migrate_tokens.py` | Perform all writes: backup → profile → config update |
+
+All file modifications go through `migrate_tokens.py` — the agent never writes files directly.
+
 ## Workflow
 
-### 1. Scan for plaintext secrets
+### 1. Scan
 
 ```bash
 python3 <skill_dir>/scripts/scan_tokens.py [path/to/openclaw.json]
 ```
 
-Output JSON: `{ findings: [...], shell: { name, profile, source_cmd, export_fmt } }`
+Output: `{ findings: [{path, env_var, length}], shell: {name, profile, source_cmd} }`
 
-- Exit 0 = clean, exit 1 = findings present, exit 2 = file not found
-- Shell detection uses `$SHELL` env var; supports zsh, bash, fish, dash, sh
+- Exit 0 = clean → report and stop
+- Exit 1 = findings present → continue
+- Exit 2 = config file not found
 
-If no findings → report clean and stop.
+### 2. Show findings to user and confirm
 
-### 2. Confirm with user
+Present a table: `path | suggested env_var | length`. Allow the user to rename any env var. **Do not proceed without explicit confirmation.**
 
-Show a table of findings (path + suggested env var). Let the user rename any env var before proceeding. Do not write anything until confirmed.
+### 3. Collect plaintext values
 
-### 3. Write env vars to shell profile
+Read `openclaw.json` to extract the current plaintext values for each flagged path. These are passed to `migrate_tokens.py` and never logged or displayed.
 
-Use the `profile` path returned by the scanner. Check for existing `export` lines to avoid duplicates.
-
-**Shell syntax differs:**
-- zsh / bash / sh / dash: `export MY_VAR="value"`
-- fish: `set -gx MY_VAR "value"` (written to `~/.config/fish/config.fish`)
-
-Read the profile file first, append only missing lines.
-
-### 4. Update openclaw.json with SecretRefs
-
-Replace each plaintext value with:
-```json
-{ "source": "env", "provider": "default", "id": "ENV_VAR_NAME" }
-```
-
-Use Python to read/write JSON — avoids shell quoting issues with special characters in tokens.
-
-Multiple paths sharing the same value (e.g. `gateway.auth.token` + `gateway.remote.token`) can point to the same env var.
-
-### 5. Source profile AND restart gateway
-
-⚠️ Both steps are required and must run in this order:
+### 4. Dry-run first
 
 ```bash
-source <profile>          # use the path from scanner output
+python3 <skill_dir>/scripts/migrate_tokens.py \
+  --dry-run \
+  --findings '<JSON>' \
+  --config ~/.openclaw/openclaw.json
+```
+
+Show the dry-run output to the user. Confirm before proceeding.
+
+### 5. Run migration
+
+```bash
+python3 <skill_dir>/scripts/migrate_tokens.py \
+  --findings '<JSON>' \
+  --values '<path→value JSON>' \
+  --config ~/.openclaw/openclaw.json
+```
+
+The script:
+1. **Backs up** `openclaw.json` → `openclaw.json.bak`
+2. **Appends** env exports to the shell profile (skips duplicates)
+3. **Replaces** plaintext values with SecretRef in `openclaw.json`
+
+### 6. Source profile + restart gateway
+
+⚠️ **Check how the gateway is managed before this step:**
+
+**Shell-launched gateway (most local setups):**
+```bash
+source <profile>          # e.g. source ~/.zshrc
 openclaw gateway restart
 ```
 
-**Why:** The gateway daemon inherits env from the shell that started it. Without `source`, new env vars are invisible to the restarted process — causing auth failures even though the config looks correct.
+**systemd-managed gateway:**
+```
+source profile does NOT work — env vars won't reach the service.
+Add vars to the systemd unit's EnvironmentFile= instead:
+  sudo systemctl edit openclaw-gateway
+  # Add: EnvironmentFile=/etc/openclaw/gateway.env
+```
 
-For fish shell, use `. <profile>` or open a new terminal session.
+**Docker / container:**
+```
+Pass env vars via docker run -e or docker-compose environment: section.
+```
 
-### 6. Verify
+### 7. Verify
 
 ```bash
-python3 <skill_dir>/scripts/scan_tokens.py   # should show empty findings
+python3 <skill_dir>/scripts/scan_tokens.py   # exit 0 = clean
 openclaw gateway status                       # should show running
+```
+
+### 8. Rollback (if needed)
+
+```bash
+python3 <skill_dir>/scripts/migrate_tokens.py --restore
 ```
 
 ## SecretRef format
@@ -75,10 +107,8 @@ openclaw gateway status                       # should show running
 { "source": "exec", "provider": "default", "id": "command --that --prints --secret" }
 ```
 
-`env` is recommended for most setups.
+## Security notes
 
-## Scanner notes
-
-- Flags fields whose key contains: `token`, `apikey`, `key`, `password`, `secret`, `credential` with value length ≥ 16
-- Skips values already in SecretRef format `{ source: ... }`
-- Common deduplication: Gemini API key often appears in both `tools.web.search.gemini.apiKey` and `skills.entries.*.apiKey` — safe to share one env var
+- `env`-based SecretRefs store values in shell profile files, which are **plaintext on disk**. This is better than openclaw.json (which may be shared/committed), but consider `file` or `exec` refs for higher-security environments.
+- The scanner flags fields matching sensitive key names (`token`, `apikey`, `key`, `password`, `secret`, `credential`) with value length ≥ 16. Existing SecretRefs are skipped.
+- Gemini API key often appears at multiple paths — safe to share one env var.
