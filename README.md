@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/safeclaw.png" width="120" alt="SafeClaw logo" />
+</p>
+
 # 🔐 Token Safety Checker
 
 **Safe claws don't leak.**
@@ -57,7 +61,7 @@ MIT
 
 # 🔐 Token 安全检查器
 
-**Safe claws don't leak. 安全的爪子不会泄漏。**
+**Safe claws don't leak. 🦀 安全的爪子不会泄漏。**
 
 大多数 OpenClaw 用户不知道，自己的 API Key 和 Bot Token 正以明文形式躺在 `openclaw.json` 里。这个 skill 会自动找到它们，并在本地完成保护——零数据上传，全程不联网。
 
