@@ -114,7 +114,6 @@ def scan(obj, path="", findings=None):
             findings.append({
                 "path": path,
                 "env_var": to_env_name(path),
-                "preview": obj[:12] + "...",
                 "length": len(obj),
             })
     return findings
