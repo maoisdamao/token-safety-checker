@@ -64,6 +64,8 @@ ENV_HINTS = {
     "tools.web.search.brave.apiKey":  "OPENCLAW_BRAVE_API_KEY",
 }
 
+ENV_VAR_RE = re.compile(r'^[A-Z_][A-Z0-9_]*$')
+
 SHELL_PROFILES = {
     "zsh":  ["~/.zshrc", "~/.zprofile"],
     "bash": ["~/.bashrc", "~/.bash_profile", "~/.profile"],
@@ -142,10 +144,30 @@ def set_nested(d: dict, dot_path: str, value):
     d[keys[-1]] = value
 
 
+def validate_env_var(name: str) -> str:
+    """Validate env var name; raise ValueError if it contains unsafe characters."""
+    if not ENV_VAR_RE.match(name):
+        raise ValueError(
+            f"Invalid env var name {name!r} — only A-Z, 0-9 and _ allowed, must start with a letter or _"
+        )
+    return name
+
+
+def shell_single_quote(value: str) -> str:
+    """
+    Wrap value in single quotes for safe shell assignment.
+    Single quotes prevent ALL interpolation ($, backtick, etc.).
+    The only special case is a literal ' in the value, handled by:
+        'before'"'"'after'  →  before'after
+    """
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
 def export_line(shell: str, env_var: str, value: str) -> str:
+    safe_value = shell_single_quote(value)
     if shell == "fish":
-        return f'set -gx {env_var} "{value}"'
-    return f'export {env_var}="{value}"'
+        return f"set -gx {env_var} {safe_value}"
+    return f"export {env_var}={safe_value}"
 
 # ── Subcommands ────────────────────────────────────────────────────────────────
 
@@ -200,6 +222,14 @@ def cmd_migrate(args):
     if not to_migrate:
         print("[OK] Nothing to migrate — all findings already resolved.")
         return
+
+    # ── Validate env var names before touching any file ──────────────────────
+    for f in to_migrate:
+        try:
+            validate_env_var(f["env_var"])
+        except ValueError as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
+            sys.exit(1)
 
     profile_path = Path(args.profile or detect_shell()["profile"]).expanduser()
     shell_name   = Path(os.environ.get("SHELL", "bash")).name

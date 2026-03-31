@@ -3,6 +3,7 @@ name: token-safety-checker
 description: Scan openclaw.json for plaintext secrets (tokens, API keys, passwords) and migrate them to environment variables using SecretRef. Use when the user asks to "check token safety", "privatize secrets", "move tokens to env vars", "audit openclaw config for secrets", or after any openclaw.json edit that may have introduced plaintext credentials. Also use when setting up a new OpenClaw instance for the first time.
 homepage: https://github.com/maoisdamao/token-safety-checker
 author: maoisdamao
+license: MIT
 ---
 
 # Token Safety Checker
