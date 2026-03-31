@@ -8,97 +8,100 @@ author: maoisdamao
 # Token Safety Checker
 
 Scan `openclaw.json` for plaintext secrets and migrate them to environment variables via SecretRef.
+All operations run locally. Secret values are never passed as CLI arguments, never logged, and never appear in agent context.
 
-## Scripts
+## Script
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/scan_tokens.py` | Detect plaintext secrets; output findings + shell info |
-| `scripts/migrate_tokens.py` | Perform all writes: backup → profile → config update |
+Single entry point: `scripts/safeclaw.py`
 
-All file modifications go through `migrate_tokens.py` — the agent never writes files directly.
+```
+python3 safeclaw.py scan    [--config PATH]
+python3 safeclaw.py migrate [--findings JSON] [--config PATH] [--profile PATH] [--dry-run] [--restore]
+```
+
+## How secrets are protected
+
+| Risk | Mitigation |
+|------|-----------|
+| Secret values in `scan` output | `scan` returns **paths + lengths only** — never values |
+| Secret values in CLI args | `migrate` reads values from disk internally — never via `--values` arg |
+| Secret values in dry-run output | Masked as `export VAR="***"` |
+| Secret values in agent context | `findings` JSON only contains `path`, `env_var`, `length` — safe to pass through SKILL |
+| Secret values in logs | No logging of values at any point |
 
 ## Workflow
 
 ### 1. Scan
 
 ```bash
-python3 <skill_dir>/scripts/scan_tokens.py [path/to/openclaw.json]
+python3 <skill_dir>/scripts/safeclaw.py scan [--config ~/.openclaw/openclaw.json]
 ```
 
-Output: `{ findings: [{path, env_var, length}], shell: {name, profile, source_cmd} }`
+Output (safe to use in agent context — no secret values):
+```json
+{
+  "findings": [
+    { "path": "channels.discord.token", "env_var": "OPENCLAW_DISCORD_TOKEN", "length": 72 }
+  ],
+  "shell": { "name": "zsh", "profile": "~/.zshrc", "source_cmd": "source ~/.zshrc" }
+}
+```
 
-- Exit 0 = clean → report and stop
-- Exit 1 = findings present → continue
-- Exit 2 = config file not found
+Exit 0 = clean → report and stop. Exit 1 = findings → continue. Exit 2 = config not found.
 
 ### 2. Show findings to user and confirm
 
-Present a table: `path | suggested env_var | length`. Allow the user to rename any env var. **Do not proceed without explicit confirmation.**
+Present the findings table (`path | env_var | length`). Allow renaming env vars. **Do not proceed without explicit confirmation.**
 
-### 3. Collect plaintext values
-
-Read `openclaw.json` to extract the current plaintext values for each flagged path. These are passed to `migrate_tokens.py` and never logged or displayed.
-
-### 4. Dry-run first
+### 3. Dry-run
 
 ```bash
-python3 <skill_dir>/scripts/migrate_tokens.py \
-  --dry-run \
-  --findings '<JSON>' \
-  --config ~/.openclaw/openclaw.json
+python3 <skill_dir>/scripts/safeclaw.py migrate \
+  --findings '<findings JSON from step 1>' \
+  --dry-run
 ```
 
-Show the dry-run output to the user. Confirm before proceeding.
+Show output to user. The script re-reads config from disk to verify findings are still current. Confirm before proceeding.
 
-### 5. Run migration
+### 4. Migrate
 
 ```bash
-python3 <skill_dir>/scripts/migrate_tokens.py \
-  --findings '<JSON>' \
-  --values '<path→value JSON>' \
-  --config ~/.openclaw/openclaw.json
+python3 <skill_dir>/scripts/safeclaw.py migrate \
+  --findings '<findings JSON from step 1>'
 ```
 
 The script:
-1. **Backs up** `openclaw.json` → `openclaw.json.bak`
-2. **Appends** env exports to the shell profile (skips duplicates)
-3. **Replaces** plaintext values with SecretRef in `openclaw.json`
+1. **Re-scans** config from disk to confirm findings are still plaintext
+2. **Backs up** `openclaw.json` → `openclaw.json.bak`
+3. **Reads** secret values internally from disk (not from CLI args)
+4. **Appends** env exports to shell profile (skips duplicates, masks values in output)
+5. **Replaces** plaintext values with SecretRef in `openclaw.json`
 
-### 6. Source profile + restart gateway
+### 5. Source profile + restart gateway
 
-⚠️ **Check how the gateway is managed before this step:**
+⚠️ Check how the gateway is managed:
 
-**Shell-launched gateway (most local setups):**
+**Shell-launched (most local setups):**
 ```bash
-source <profile>          # e.g. source ~/.zshrc
+source <profile>
 openclaw gateway restart
 ```
 
-**systemd-managed gateway:**
-```
-source profile does NOT work — env vars won't reach the service.
-Add vars to the systemd unit's EnvironmentFile= instead:
-  sudo systemctl edit openclaw-gateway
-  # Add: EnvironmentFile=/etc/openclaw/gateway.env
-```
+**systemd:** Add vars to `EnvironmentFile=` in the unit — sourcing a shell profile won't work.
 
-**Docker / container:**
-```
-Pass env vars via docker run -e or docker-compose environment: section.
-```
+**Docker:** Pass via `-e` or `environment:` in compose.
 
-### 7. Verify
+### 6. Verify
 
 ```bash
-python3 <skill_dir>/scripts/scan_tokens.py   # exit 0 = clean
-openclaw gateway status                       # should show running
+python3 <skill_dir>/scripts/safeclaw.py scan   # exit 0 = clean
+openclaw gateway status
 ```
 
-### 8. Rollback (if needed)
+### 7. Rollback
 
 ```bash
-python3 <skill_dir>/scripts/migrate_tokens.py --restore
+python3 <skill_dir>/scripts/safeclaw.py migrate --restore
 ```
 
 ## SecretRef format
@@ -106,11 +109,7 @@ python3 <skill_dir>/scripts/migrate_tokens.py --restore
 ```json
 { "source": "env",  "provider": "default", "id": "MY_ENV_VAR" }
 { "source": "file", "provider": "default", "id": "/path/to/secret.txt" }
-{ "source": "exec", "provider": "default", "id": "command --that --prints --secret" }
+{ "source": "exec", "provider": "default", "id": "command --prints --secret" }
 ```
 
-## Security notes
-
-- `env`-based SecretRefs store values in shell profile files, which are **plaintext on disk**. This is better than openclaw.json (which may be shared/committed), but consider `file` or `exec` refs for higher-security environments.
-- The scanner flags fields matching sensitive key names (`token`, `apikey`, `key`, `password`, `secret`, `credential`) with value length ≥ 16. Existing SecretRefs are skipped.
-- Gemini API key often appears at multiple paths — safe to share one env var.
+`env` is recommended for most setups. For higher-security environments, prefer `file` or `exec`.
