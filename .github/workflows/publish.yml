@@ -4,9 +4,30 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual release (e.g. from an environment that cannot push tags): creates tag v<version> on the
+  # dispatched commit via the GitHub release, then publishes exactly like a tag push.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, without the v (must match .claude-plugin/plugin.json)'
+        required: true
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release version matches plugin.json and the script
+        run: |
+          VERSION=${RELEASE_TAG#v}
+          grep -q "\"version\": \"$VERSION\"" .claude-plugin/plugin.json
+          grep -q "^VERSION = \"$VERSION\"" scripts/safeclaw.py
+
   test:
+    needs: check-version
     uses: ./.github/workflows/test.yml
 
   clawhub:
@@ -38,7 +59,7 @@ jobs:
 
       - name: Extract changelog for this version
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           python3 - "$VERSION" > /tmp/changelog.md <<'EOF'
           import re, sys
           text = open("CHANGELOG.md", encoding="utf-8").read()
@@ -49,7 +70,7 @@ jobs:
 
       - name: Publish to ClawHub
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           clawhub publish /tmp/skill-publish \
             --slug token-safety-checker \
             --name "Token Safety Checker" \
@@ -57,7 +78,7 @@ jobs:
             --changelog "$(cat /tmp/changelog.md)" \
             --source-repo "$GITHUB_REPOSITORY" \
             --source-commit "$GITHUB_SHA" \
-            --source-ref "$GITHUB_REF_NAME"
+            --source-ref "$RELEASE_TAG"
 
   github-release:
     # Claude: release notes + tightlip.zip for claude.ai / Skills API upload.
@@ -74,7 +95,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           python3 - "$VERSION" > /tmp/notes.md <<'EOF'
           import re, sys
           text = open("CHANGELOG.md", encoding="utf-8").read()
@@ -91,6 +112,6 @@ jobs:
           **claude.ai** — download `tightlip.zip` below → Settings → Capabilities → Skills → Upload skill
           """)
           EOF
-          gh release create "$GITHUB_REF_NAME" dist/tightlip.zip \
+          gh release create "$RELEASE_TAG" dist/tightlip.zip --target "$GITHUB_SHA" \
             --title "v$VERSION — tightlip: secrets out of agent memory" \
             --notes-file /tmp/notes.md
