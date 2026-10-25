@@ -22,7 +22,7 @@ Now for both **OpenClaw** and **Claude Code**.
 
 🙈 **Still zero secrets in output.** You only ever see paths, line numbers and fingerprints like sha256:93be4b37. Everything runs 100% locally, with no network calls.
 
-🕵️ Fun fact from testing: on OpenClaw, setting a token with `openclaw config set` can leave a plaintext copy in the config audit log, and OpenClaw's own config backups keep plaintext tokens after you migrate. v3.0 finds both.
+🕵️ Fun fact from testing: on OpenClaw 2026.6, setting a token with `openclaw config set` left a plaintext copy in the config audit log. 2026.10 fixed it, but old logs keep the copy. OpenClaw's own config backups also hold plaintext tokens after you migrate. v3.0 finds both.
 
 📦 Install:
 🦀 OpenClaw → clawhub install token-safety-checker

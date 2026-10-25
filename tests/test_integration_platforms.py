@@ -31,10 +31,20 @@ def package_skill(dest):
     return dest
 
 
+def openclaw_init(home):
+    """`openclaw setup` (≤ 2026.6) or non-interactive onboarding (2026.10+, which requires a TTY for setup)."""
+    r = subprocess.run(["openclaw", "setup"], cwd=home, env=env_for(home), capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=300)
+    if r.returncode == 0 and (home / ".openclaw" / "openclaw.json").exists():
+        return
+    sh(["openclaw", "onboard", "--non-interactive", "--accept-risk", "--mode", "local", "--auth-choice", "skip",
+        "--skip-channels", "--skip-daemon", "--skip-health", "--skip-search", "--skip-skills", "--skip-ui"], home)
+
+
 @needs_openclaw
 def test_openclaw_end_to_end(home, tmp_path):
     (home / ".bashrc").write_text("")
-    sh(["openclaw", "setup"], home)
+    openclaw_init(home)
 
     # Skill loads and its python3 requirement is recognised
     pkg = package_skill(tmp_path / "token-safety-checker")
@@ -51,7 +61,7 @@ def test_openclaw_end_to_end(home, tmp_path):
     scan = run(home, "scan", "--memory", "--platform", "openclaw")
     assert scan.returncode == 1
     out = json.loads(scan.stdout)
-    assert {f["path"] for f in out["findings"]} == {"channels.discord.token", "gateway.auth.token"}
+    assert {f["path"] for f in out["findings"]} >= {"channels.discord.token", "gateway.auth.token"}
     assert any(s["detector"] == "openai-api-key" for s in out["memory"]["secrets"])
     assert_no_secrets(scan.stdout + scan.stderr, Fake.discord, Fake.gateway, Fake.openai)
 

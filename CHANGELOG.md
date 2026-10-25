@@ -14,7 +14,7 @@ All notable changes to token-safety-checker are documented here.
   - long-term: OpenClaw `MEMORY.md` / `USER.md` / `DREAMS.md` / persona files / `memory/imports`; Claude Code `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, auto memory (`~/.claude/projects/*/memory`)
   - short-term: OpenClaw daily notes (`memory/YYYY-MM-DD.md`, written by the pre-compaction flush), Claude Code prompt history
   - transcripts: OpenClaw session `.jsonl` + `.sqlite`, Claude Code session `.jsonl` + tool results
-  - logs: OpenClaw `logs/*.jsonl` — `config-audit.jsonl` records `openclaw config set` arguments, which can include tokens
+  - logs: OpenClaw `logs/*.jsonl` — on OpenClaw ≤ 2026.6, `config-audit.jsonl` recorded `openclaw config set` arguments, including tokens
 - **Value-based detectors** for Anthropic, OpenAI, GitHub, Slack, AWS, Stripe, Discord, Telegram, Google, Hugging Face, JWT, private keys, bearer tokens, URL credentials and high-entropy assignments — with placeholder filtering
 - **Live-secret matching** — flags memory hits that equal a secret currently in `openclaw.json` or behind a SecretRef env var (rotate these first)
 - **Fingerprints** (`sha256:xxxxxxxx`) to correlate the same secret across files without revealing it; per-provider rotation hints

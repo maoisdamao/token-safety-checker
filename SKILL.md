@@ -67,7 +67,7 @@ What it scans:
 | `long_term` | workspace `MEMORY.md`, `USER.md`, `DREAMS.md`, `SOUL.md`, `AGENTS.md`, `TOOLS.md`…, `memory/imports/` | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, auto memory `~/.claude/projects/*/memory/`, project `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/`, `AGENTS.md` |
 | `short_term` | daily notes `memory/YYYY-MM-DD*.md` (written by the pre-compaction memory flush) | `~/.claude/history.jsonl` (prompt history) |
 | `transcript` | `agents/*/sessions/*.jsonl`, `agents/*/agent/*.sqlite` | `~/.claude/projects/*/*.jsonl`, tool results |
-| `log` | `logs/*.jsonl` (e.g. `config-audit.jsonl` records `openclaw config set` arguments) | — |
+| `log` | `logs/*.jsonl` (e.g. `config-audit.jsonl`, which recorded `openclaw config set` arguments up to OpenClaw 2026.6) | — |
 
 Output `memory.secrets[]` — one entry per unique secret: `detector`, `risk`, `fingerprint`, `length`,
 `occurrences`, `scopes`, `locations[]` (`file`, `line`; sqlite rows show `table:rowid=N`), `live_match`

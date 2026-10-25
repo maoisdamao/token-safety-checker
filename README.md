@@ -30,7 +30,7 @@ and installs a guard so new ones never get written. Works for **OpenClaw** 🦀 
 | ✳️ Claude Code (older than v2.1.275) | `claude plugin marketplace add maoisdamao/token-safety-checker` then `claude plugin install tightlip@maoisdamao` |
 | 💬 **claude.ai** | Download `tightlip.zip` from the [latest release](https://github.com/maoisdamao/token-safety-checker/releases/latest) → Settings → Capabilities → Skills → Upload |
 
-Requires `python3` (3.9+).
+Requires `python3` (3.10+).
 
 ## 💬 Usage
 
@@ -73,9 +73,10 @@ Each unique secret is reported once with its fingerprint, every place it appears
 
 🔎 **Live match** = that leaked value is the token your agent is using *right now*. Rotate those first.
 
-> 💡 Found while testing on OpenClaw 2026.6: `openclaw config set channels.discord.token <token>` writes the full
-> command line — token included — to `~/.openclaw/logs/config-audit.jsonl`, and OpenClaw's rotating
-> `openclaw.json.bak*` files keep plaintext tokens after you migrate. v3 catches both.
+> 💡 Found while testing on OpenClaw 2026.6: `openclaw config set channels.discord.token <token>` wrote the full
+> command line — token included — to `~/.openclaw/logs/config-audit.jsonl` (no longer the case in 2026.10 — update!),
+> and OpenClaw's rotating `openclaw.json.bak*` files keep plaintext tokens after you migrate. v3 catches both,
+> so older logs that already hold a token are found too.
 
 ### 🛡️ Leak guard
 
@@ -191,7 +192,8 @@ Token 会以明文出现在 `openclaw.json`、`MEMORY.md`、每日笔记、`CLAU
 每个密钥只报告一次：指纹、出现的所有位置、如何轮换。🔎 **live match** 表示泄露的值正是 agent 当前在用的 token——优先轮换。
 
 > 💡 实测发现（OpenClaw 2026.6）：`openclaw config set channels.discord.token <token>` 会把完整命令（包括 token）写进
-> `~/.openclaw/logs/config-audit.jsonl`；迁移之后 OpenClaw 自己的 `openclaw.json.bak*` 备份里也仍有明文 token。v3 都能查出来。
+> `~/.openclaw/logs/config-audit.jsonl`（2026.10 已修复，建议升级）；迁移之后 OpenClaw 自己的 `openclaw.json.bak*` 备份里也仍有明文 token。
+> v3 都能查出来，包括旧日志里已经存在的 token。
 
 ### 🛡️ 泄露防护
 
