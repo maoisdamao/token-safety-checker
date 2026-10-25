@@ -1,0 +1,15 @@
+{
+  "name": "maoisdamao",
+  "description": "Agent safety skills by maoisdamao",
+  "owner": {
+    "name": "maoisdamao",
+    "url": "https://github.com/maoisdamao"
+  },
+  "plugins": [
+    {
+      "name": "tightlip",
+      "source": "./",
+      "description": "Secret & token leak guard for agent memory — scan CLAUDE.md, auto memory and transcripts for leaked keys, and block new ones."
+    }
+  ]
+}

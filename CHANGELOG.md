@@ -4,6 +4,44 @@ All notable changes to token-safety-checker are documented here.
 
 ---
 
+## [3.0.0] - 2026-10-25
+
+**tightlip** — v3 takes secrets out of agent memory, not just config. Same skill on ClawHub
+(`token-safety-checker`) and now on Claude (`tightlip`).
+
+### Added
+- **Memory + transcript scan** (`memory`, or `scan --memory`) for OpenClaw and Claude Code
+  - long-term: OpenClaw `MEMORY.md` / `USER.md` / `DREAMS.md` / persona files / `memory/imports`; Claude Code `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, auto memory (`~/.claude/projects/*/memory`)
+  - short-term: OpenClaw daily notes (`memory/YYYY-MM-DD.md`, written by the pre-compaction flush), Claude Code prompt history
+  - transcripts: OpenClaw session `.jsonl` + `.sqlite`, Claude Code session `.jsonl` + tool results
+  - logs: OpenClaw `logs/*.jsonl` — `config-audit.jsonl` records `openclaw config set` arguments, which can include tokens
+- **Value-based detectors** for Anthropic, OpenAI, GitHub, Slack, AWS, Stripe, Discord, Telegram, Google, Hugging Face, JWT, private keys, bearer tokens, URL credentials and high-entropy assignments — with placeholder filtering
+- **Live-secret matching** — flags memory hits that equal a secret currently in `openclaw.json` or behind a SecretRef env var (rotate these first)
+- **Fingerprints** (`sha256:xxxxxxxx`) to correlate the same secret across files without revealing it; per-provider rotation hints
+- **`install-guard` / `uninstall-guard`** — Claude Code `PreToolUse` hook that denies writing secrets into memory / instruction files (`--scope all` for every write); OpenClaw workspace git `pre-commit` hook
+- Claude Code plugin + marketplace (`/plugin install tightlip --marketplace maoisdamao/token-safety-checker`), claude.ai upload bundle (`tightlip.zip` on each GitHub release)
+- Config scan also detects provider-shaped values under any key, plus `Authorization` / `bearer` keys and current OpenClaw keys (`channels.telegram.botToken`, Slack `botToken` / `appToken` / `signingSecret`, multi-account `channels.*.accounts.*`)
+- `migrate --secure-profile`, `migrate --list-backups`, `migrate --restore --backup FILE`
+- Test suite (unit + real OpenClaw / Claude Code CLI integration) and CI on every push; publishing runs only after tests pass
+
+### Fixed
+- `migrate` wrote list paths (`providers[0].apiKey`) to a wrong key named `"providers[0]"`
+- Two different secrets sharing an env var hint (e.g. `gateway.auth.token` / `gateway.remote.token`) silently lost one value — scan now assigns unique names and migrate refuses collisions
+- Re-running `migrate` overwrote the original `.bak` — backups are now timestamped, `chmod 600`, never overwritten; `--restore` picks the newest of ours (falls back to the v2 `.bak`) and ignores OpenClaw's own rotating backups
+- Profile duplicate check was a substring match (`FOO_TOKEN` matched `FOO_TOKEN_2`) and skipped vars that held a *different* (stale) value — now exact-name and value-aware
+- JSON5 configs (comments / trailing commas) crashed `scan`; now scanned, and `migrate` refuses to rewrite them instead of deleting comments
+- `migrate` reformatted the config with 4-space indents — now keeps the original indentation, file mode, and writes atomically
+- `verify` treated `file` / `exec` SecretRef ids as env var names; `file` refs are now checked for existence and permissions
+- `${VAR}` env templates and `tokenFile` / `*Path` pointer keys are no longer reported as secrets
+
+### Changed
+- `verify` now flags any backup that still holds plaintext — including OpenClaw's own `openclaw.json.bak*` — and `--clean-backup` removes those
+- `verify` warns when the shell profile holding exports is readable by others
+- SKILL.md frontmatter is valid for both ClawHub and claude.ai (`homepage` / `author` moved into `metadata`)
+- Scan findings include a `fingerprint`; output JSON includes `version`
+
+---
+
 ## [2.0.0] - 2026-04-02
 
 ### Added
