@@ -2,22 +2,31 @@
 
 ## Purpose
 
-`token-safety-checker` is a **defensive security tool**. It exists to *remove* plaintext secrets from OpenClaw configuration, not to extract or exfiltrate them.
+`token-safety-checker` (tightlip) is a **defensive security tool**. It exists to *find and remove* plaintext
+secrets from AI agent configuration and memory, not to extract or exfiltrate them.
 
-## What this skill does
+## What this skill reads
 
-- **Reads** `openclaw.json` to detect plaintext credential fields (tokens, API keys)
-- **Writes** environment variable exports to the user's local shell profile (`~/.zshrc` etc.)
-- **Replaces** plaintext values in `openclaw.json` with SecretRef pointers (`{ "source": "env", ... }`)
-- The actual secret values are **never logged, printed, or transmitted** — only field paths and lengths are reported
+- `openclaw.json` (and, with `--deep`, its git history)
+- Agent memory and transcripts, read-only (`memory` / `scan --memory`):
+  - OpenClaw: workspace memory files, `memory/`, `agents/*/sessions`, `agents/*/agent/*.sqlite` (opened read-only), `logs/`
+  - Claude Code: `CLAUDE.md` files, `.claude/rules`, auto memory, `history.jsonl`, session transcripts
+- It does **not** read `~/.openclaw/credentials/` or other credential stores
 
-## What this skill does NOT do
+## What this skill writes (only when you run these commands)
 
-- Does not send any data to external servers
-- Does not log or store secret values
-- Does not make network requests
-- All operations are local to the user's machine
+- `migrate`: a timestamped `chmod 600` backup of `openclaw.json`, env exports appended to your shell profile, SecretRefs in `openclaw.json`
+- `migrate --secure-profile`: `chmod 600` on your shell profile
+- `verify --clean-backup`: deletes backups that still contain plaintext secrets
+- `install-guard`: a `PreToolUse` hook in `~/.claude/settings.json` (backup written first) + a copy of the script in `~/.claude/hooks/`; a git `pre-commit` hook in OpenClaw workspaces (never overwrites a hook it did not create)
+
+## Guarantees
+
+- Secret values are **never printed, logged, passed as CLI arguments, or transmitted**. Output contains paths,
+  line numbers, detector names, lengths and truncated SHA-256 fingerprints only. The test suite asserts this for every command.
+- No network requests. Python standard library only.
+- The Claude Code guard fails open: if the hook itself errors, your session is not blocked.
 
 ## Reporting a vulnerability
 
-If you find a security issue in this skill, please open a GitHub issue or contact the maintainer directly.
+Please open a GitHub issue (without including any real secret) or contact the maintainer directly.

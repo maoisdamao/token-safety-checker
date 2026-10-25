@@ -1,4 +1,4 @@
-name: Publish to ClawHub
+name: Publish
 
 on:
   push:
@@ -6,14 +6,18 @@ on:
       - 'v*'
 
 jobs:
-  publish:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  clawhub:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install clawhub CLI
         run: npm install -g clawhub
@@ -26,10 +30,22 @@ jobs:
           echo "{\"registry\":\"https://clawhub.ai\",\"token\":\"$CLAWHUB_TOKEN\"}" \
             > "$HOME/.config/clawhub/config.json"
 
-      - name: Prepare skill package (exclude .github)
+      - name: Prepare skill package (skill files only)
         run: |
           mkdir -p /tmp/skill-publish
-          rsync -av --exclude='.github' --exclude='.git' . /tmp/skill-publish/
+          rsync -av --exclude='.git' --exclude='.github' --exclude='tests' --exclude='tools' \
+            --exclude='docs' --exclude='.claude-plugin' --exclude='.gitignore' . /tmp/skill-publish/
+
+      - name: Extract changelog for this version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          python3 - "$VERSION" > /tmp/changelog.md <<'EOF'
+          import re, sys
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## \[" + re.escape(sys.argv[1]) + r"\][^\n]*\n(.*?)(?=^---$|^## \[)", text, re.M | re.S)
+          print(m.group(1).strip() if m else f"Release {sys.argv[1]}")
+          EOF
+          cat /tmp/changelog.md
 
       - name: Publish to ClawHub
         run: |
@@ -38,4 +54,43 @@ jobs:
             --slug token-safety-checker \
             --name "Token Safety Checker" \
             --version "$VERSION" \
-            --changelog "Release $VERSION"
+            --changelog "$(cat /tmp/changelog.md)" \
+            --source-repo "$GITHUB_REPOSITORY" \
+            --source-commit "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF_NAME"
+
+  github-release:
+    # Claude: release notes + tightlip.zip for claude.ai / Skills API upload.
+    # Claude Code installs straight from the repo's .claude-plugin/marketplace.json.
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build claude.ai skill bundle
+        run: python3 tools/build_claude_skill.py --out dist/tightlip.zip
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          python3 - "$VERSION" > /tmp/notes.md <<'EOF'
+          import re, sys
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## \[" + re.escape(sys.argv[1]) + r"\][^\n]*\n(.*?)(?=^---$|^## \[)", text, re.M | re.S)
+          body = m.group(1).strip() if m else ""
+          print(body + """
+
+          ## Install
+
+          **OpenClaw** — `clawhub install token-safety-checker`
+
+          **Claude Code** — `/plugin install tightlip --marketplace maoisdamao/token-safety-checker`
+
+          **claude.ai** — download `tightlip.zip` below → Settings → Capabilities → Skills → Upload skill
+          """)
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/tightlip.zip \
+            --title "v$VERSION — tightlip: secrets out of agent memory" \
+            --notes-file /tmp/notes.md
