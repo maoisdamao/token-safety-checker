@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "scripts" / "safeclaw.py"
-sys.path.insert(0, str(ROOT / "scripts"))
+SKILL_DIR = ROOT / "plugins" / "tightlip"
+SCRIPT = SKILL_DIR / "scripts" / "safeclaw.py"
+sys.path.insert(0, str(SKILL_DIR / "scripts"))
 
 _ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 

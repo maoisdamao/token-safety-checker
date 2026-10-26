@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, without the v (must match .claude-plugin/plugin.json)'
+        description: 'Version to release, without the v (must match plugins/tightlip/.claude-plugin/plugin.json)'
         required: true
 
 env:
@@ -23,8 +23,8 @@ jobs:
       - name: Release version matches plugin.json and the script
         run: |
           VERSION=${RELEASE_TAG#v}
-          grep -q "\"version\": \"$VERSION\"" .claude-plugin/plugin.json
-          grep -q "^VERSION = \"$VERSION\"" scripts/safeclaw.py
+          grep -q "\"version\": \"$VERSION\"" plugins/tightlip/.claude-plugin/plugin.json
+          grep -q "^VERSION = \"$VERSION\"" plugins/tightlip/scripts/safeclaw.py
 
   test:
     needs: check-version
@@ -54,8 +54,7 @@ jobs:
       - name: Prepare skill package (skill files only)
         run: |
           mkdir -p /tmp/skill-publish
-          rsync -av --exclude='.git' --exclude='.github' --exclude='tests' --exclude='tools' \
-            --exclude='docs' --exclude='.claude-plugin' --exclude='.gitignore' . /tmp/skill-publish/
+          rsync -av --exclude='.claude-plugin' plugins/tightlip/ /tmp/skill-publish/
 
       - name: Extract changelog for this version
         run: |

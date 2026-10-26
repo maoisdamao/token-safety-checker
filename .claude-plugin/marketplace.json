@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "tightlip",
-      "source": "./",
+      "source": "./plugins/tightlip",
       "description": "Secret & token leak guard for agent memory — scan CLAUDE.md, auto memory and transcripts for leaked keys, and block new ones."
     }
   ]
