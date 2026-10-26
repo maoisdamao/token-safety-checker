@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from conftest import ROOT, Fake, assert_no_secrets, env_for, run
+from conftest import ROOT, SKILL_DIR, Fake, assert_no_secrets, env_for, run
 
 needs_openclaw = pytest.mark.skipif(not shutil.which("openclaw"), reason="openclaw CLI not installed")
 needs_claude = pytest.mark.skipif(not shutil.which("claude"), reason="claude CLI not installed")
@@ -24,10 +24,9 @@ def sh(cmd, home, extra_env=None, check=True, timeout=300):
 
 
 def package_skill(dest):
-    """Copy the skill the way the ClawHub publish job does (no .git/.github/tests/tools/docs)."""
-    ignore = shutil.ignore_patterns(".git", ".github", "tests", "tools", "docs", ".claude-plugin",
-                                    "__pycache__", ".pytest_cache", "dist")
-    shutil.copytree(ROOT, dest, ignore=ignore)
+    """Copy the skill the way the ClawHub publish job does (plugin folder minus Claude manifest)."""
+    ignore = shutil.ignore_patterns(".claude-plugin", "__pycache__", ".pytest_cache")
+    shutil.copytree(SKILL_DIR, dest, ignore=ignore)
     return dest
 
 
@@ -79,8 +78,9 @@ def test_openclaw_end_to_end(home, tmp_path):
 
 @needs_claude
 def test_claude_plugin_validates_and_installs(home, tmp_path):
-    r = subprocess.run(["claude", "plugin", "validate", "--strict", str(ROOT)], capture_output=True, text=True)
-    assert r.returncode == 0, r.stdout + r.stderr
+    for target in (ROOT, SKILL_DIR):  # marketplace, then the plugin itself
+        r = subprocess.run(["claude", "plugin", "validate", "--strict", str(target)], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
 
     cfg = tmp_path / "claude-config"
     cfg.mkdir()
@@ -89,6 +89,35 @@ def test_claude_plugin_validates_and_installs(home, tmp_path):
     sh(["claude", "plugin", "install", "tightlip@maoisdamao"], home, env)
     details = sh(["claude", "plugin", "details", "tightlip"], home, env).stdout
     assert "token-safety-checker" in details
+
+
+def test_plugin_folder_ships_only_skill_files():
+    """Anthropic's directory review flags download-and-run commands and images with embedded text,
+    so the plugin folder must hold only the skill itself (no CI, tests, docs or images besides the icon)."""
+    files = sorted(str(p.relative_to(SKILL_DIR)) for p in SKILL_DIR.rglob("*")
+                   if p.is_file() and "__pycache__" not in p.parts)
+    assert files == [".claude-plugin/icon.png", ".claude-plugin/plugin.json", "LICENSE.md", "README.md",
+                     "SKILL.md", "scripts/safeclaw.py"]
+    import re
+    for f in files:
+        if f.endswith(".png"):
+            continue
+        text = (SKILL_DIR / f).read_text(encoding="utf-8")
+        assert not re.search(r"(?:curl|wget)[^\n|]*\|\s*(?:ba|z)?sh|npm install|pip install|npx ", text), f
+
+
+def test_icon_is_valid_for_directory():
+    import struct
+    data = (SKILL_DIR / ".claude-plugin" / "icon.png").read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) < 2 * 1024 * 1024
+    w, h = struct.unpack(">II", data[16:24])
+    assert w == h and 512 <= w <= 2048
+    i, chunks = 8, []
+    while i < len(data):
+        n, t = struct.unpack(">I4s", data[i:i + 8])
+        chunks.append(t)
+        i += 12 + n
+    assert set(chunks) <= {b"IHDR", b"PLTE", b"tRNS", b"IDAT", b"IEND", b"pHYs", b"sRGB", b"gAMA"}, chunks
 
 
 def test_claude_ai_bundle(tmp_path):

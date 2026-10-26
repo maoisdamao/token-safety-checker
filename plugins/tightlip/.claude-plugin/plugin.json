@@ -10,5 +10,15 @@
   "homepage": "https://github.com/maoisdamao/token-safety-checker",
   "repository": "https://github.com/maoisdamao/token-safety-checker",
   "license": "MIT",
-  "keywords": ["security", "secrets", "api-key", "token", "leak", "memory", "claude-code", "openclaw"]
+  "keywords": [
+    "security",
+    "secrets",
+    "api-key",
+    "token",
+    "leak",
+    "memory",
+    "claude-code",
+    "openclaw"
+  ],
+  "icon": "./.claude-plugin/icon.png"
 }

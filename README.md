@@ -107,7 +107,7 @@ JSON5 support, preserved formatting, `--secure-profile`. Full list in [CHANGELOG
 | `verify [--clean-backup]` | Health check: plaintext left, permissions, env vars, leaky backups |
 | `install-guard` · `uninstall-guard` | Leak prevention hooks |
 
-`safeclaw` = `python3 <skill dir>/scripts/safeclaw.py`. Full agent workflow: [SKILL.md](SKILL.md).
+`safeclaw` = `python3 <skill dir>/scripts/safeclaw.py`. Full agent workflow: [SKILL.md](plugins/tightlip/SKILL.md).
 
 ## 🔴🟡🟢 Risk levels
 
@@ -126,7 +126,7 @@ JSON5 support, preserved formatting, `--secure-profile`. Full list in [CHANGELOG
 
 ## 🤝 Contributing
 
-PRs welcome! Run `python3 -m pytest` before sending. See [SKILL.md](SKILL.md) for the workflow spec.
+PRs welcome! Run `python3 -m pytest` before sending. The skill lives in [`plugins/tightlip/`](plugins/tightlip/) — workflow spec in [SKILL.md](plugins/tightlip/SKILL.md).
 
 ## 📄 License
 

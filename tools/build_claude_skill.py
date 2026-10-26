@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+SKILL_DIR = ROOT / "plugins" / "tightlip"
 ALLOWED = {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
 
 
@@ -39,7 +40,7 @@ def main():
     ap.add_argument("--name", default="tightlip")
     args = ap.parse_args()
 
-    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     skill = re.sub(r"^name: .*$", f"name: {args.name}", skill, count=1, flags=re.M)
     check_frontmatter(skill, args.name)
 
@@ -47,8 +48,8 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{args.name}/SKILL.md", skill)
-        z.write(ROOT / "scripts" / "safeclaw.py", f"{args.name}/scripts/safeclaw.py")
-        z.write(ROOT / "LICENSE.md", f"{args.name}/LICENSE.md")
+        z.write(SKILL_DIR / "scripts" / "safeclaw.py", f"{args.name}/scripts/safeclaw.py")
+        z.write(SKILL_DIR / "LICENSE.md", f"{args.name}/LICENSE.md")
     print(f"[OK] {out}")
 
 
