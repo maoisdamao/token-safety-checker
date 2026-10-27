@@ -146,17 +146,18 @@ PROVIDER_DETECTORS = {n for n, _, _, _ in DETECTORS} - {"generic-secret", "beare
 PLACEHOLDER_HINTS = ("example", "your", "xxxx", "placeholder", "redacted", "changeme",
                      "dummy", "sample", "<", ">", "***", "…", "${", "{{")
 
+# Plain navigation text, no URLs: the script never contacts or names a remote host.
 ROTATE_HINTS = {
-    "anthropic-api-key":  "Revoke + recreate at https://console.anthropic.com/settings/keys",
-    "openai-api-key":     "Revoke + recreate at https://platform.openai.com/api-keys",
-    "github-token":       "Revoke at https://github.com/settings/tokens",
+    "anthropic-api-key":  "Anthropic Console → Settings → API keys: revoke it and create a new one",
+    "openai-api-key":     "OpenAI platform → API keys: revoke it and create a new one",
+    "github-token":       "GitHub → Settings → Developer settings → Tokens: revoke it",
     "slack-token":        "Rotate in your Slack app settings (OAuth & Permissions)",
     "aws-access-key-id":  "Deactivate + delete the access key in AWS IAM",
     "stripe-live-key":    "Roll the key in the Stripe dashboard (Developers → API keys)",
     "discord-bot-token":  "Discord Developer Portal → your app → Bot → Reset Token",
     "telegram-bot-token": "Message @BotFather → /revoke",
     "google-api-key":     "Regenerate in Google Cloud Console → APIs & Services → Credentials",
-    "huggingface-token":  "Invalidate at https://huggingface.co/settings/tokens",
+    "huggingface-token":  "Hugging Face → Settings → Access Tokens: invalidate it",
     "private-key":        "Generate a new key pair and remove the old public key everywhere it is trusted",
 }
 ROTATE_DEFAULT = "Rotate this credential at its provider — it has already been sent to a model provider"
