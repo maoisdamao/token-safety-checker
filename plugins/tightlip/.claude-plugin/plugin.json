@@ -1,7 +1,7 @@
 {
   "name": "tightlip",
   "displayName": "tightlip — Secret & Token Leak Guard for Agent Memory",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Find and fix leaked API keys and tokens in your AI agent's memory, transcripts and config (Claude Code + OpenClaw). Scans CLAUDE.md, auto memory and session transcripts, and installs a hook that blocks secrets from being written into memory. Secret values are never printed.",
   "author": {
     "name": "maoisdamao",

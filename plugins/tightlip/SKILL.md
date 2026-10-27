@@ -2,7 +2,7 @@
 name: token-safety-checker
 description: Find and fix leaked API keys, tokens and passwords in your AI agent's config, long/short-term memory and session transcripts (OpenClaw + Claude Code). Use when the user asks to check token or secret safety, scan for leaked credentials, audit agent memory, MEMORY.md, CLAUDE.md or chat history for secrets, move plaintext tokens in openclaw.json to env vars, or stop secrets from being written into memory. Also use after editing openclaw.json or when setting up a new OpenClaw instance. Secret values are never printed.
 license: MIT
-metadata: {"author": "maoisdamao", "version": "3.0.0", "homepage": "https://github.com/maoisdamao/token-safety-checker", "openclaw": {"emoji": "🔐", "homepage": "https://github.com/maoisdamao/token-safety-checker", "requires": {"bins": ["python3"]}}}
+metadata: {"author": "maoisdamao", "version": "3.0.1", "homepage": "https://github.com/maoisdamao/token-safety-checker", "openclaw": {"emoji": "🔐", "homepage": "https://github.com/maoisdamao/token-safety-checker", "requires": {"bins": ["python3"]}}}
 ---
 
 # Token Safety Checker 🔐 (tightlip)

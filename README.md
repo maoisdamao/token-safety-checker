@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/safeclaw.png" width="120" alt="SafeClaw logo" />
+  <img src="assets/tightlip.png" width="120" alt="tightlip logo — a robot with a zipped mouth" />
 </p>
 
 # 🔐 Token Safety Checker · tightlip 🤐
