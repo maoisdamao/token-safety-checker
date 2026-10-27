@@ -106,6 +106,15 @@ def test_plugin_folder_ships_only_skill_files():
         assert not re.search(r"(?:curl|wget)[^\n|]*\|\s*(?:ba|z)?sh|npm install|pip install|npx ", text), f
 
 
+def test_script_names_no_remote_host():
+    """The directory holds plugins that read env vars *and* name a remote URL ("credential could leave
+    the machine"). The script reads SecretRef env vars to recognise live secrets, so it must not
+    contain any URL — it is local-only."""
+    import re
+    text = (SKILL_DIR / "scripts" / "safeclaw.py").read_text(encoding="utf-8")
+    assert not re.search(r"(?i)\b(?:https?|wss?|ftp)://", text)
+
+
 def test_icon_is_valid_for_directory():
     import struct
     data = (SKILL_DIR / ".claude-plugin" / "icon.png").read_bytes()
