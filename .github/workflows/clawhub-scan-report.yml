@@ -1,7 +1,7 @@
 name: ClawHub scan report
 
 # Prints ClawHub publication + security-scan status for a version into the job log
-# (moderation, owner view of the version, `skill verify`, stored scan archive).
+# (moderation, owner view of the version, `skill verify`, stored scan archive). Default: latest release.
 on:
   workflow_dispatch:
     inputs:
