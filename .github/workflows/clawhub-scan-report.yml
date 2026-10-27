@@ -1,0 +1,52 @@
+name: ClawHub scan report
+
+# Prints ClawHub publication + security-scan status for a version into the job log
+# (moderation, owner view of the version, `skill verify`, stored scan archive).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to report on'
+        required: true
+  push:
+    branches: ['claude/**']
+    paths: ['.github/workflows/clawhub-scan-report.yml']
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ inputs.version || '3.0.1' }}
+      SLUG: token-safety-checker
+      API: https://clawhub.ai/api/v1
+      CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g clawhub
+      - name: Configure clawhub auth
+        run: |
+          mkdir -p "$HOME/.config/clawhub"
+          echo "{\"registry\":\"https://clawhub.ai\",\"token\":\"$CLAWHUB_TOKEN\"}" > "$HOME/.config/clawhub/config.json"
+      - name: Owner API views
+        timeout-minutes: 3
+        run: |
+          for path in "skills/$SLUG/versions/$VERSION" "skills/$SLUG/moderation" "skills/$SLUG"; do
+            echo "::group::GET /$path"
+            curl -sS -m 30 -H "Authorization: Bearer $CLAWHUB_TOKEN" -H "Accept: application/json" "$API/$path" | head -c 20000; echo
+            echo "::endgroup::"
+          done
+      - name: skill verify
+        timeout-minutes: 3
+        run: |
+          echo "::group::verify $VERSION"; clawhub --no-input skill verify "$SLUG" --version "$VERSION" || true; echo "::endgroup::"
+      - name: Stored scan results
+        timeout-minutes: 5
+        run: |
+          clawhub --no-input scan download "$SLUG" --version "$VERSION" -o report.zip || exit 0
+          mkdir -p report && cd report && unzip -o -q ../report.zip
+          for f in $(find . -type f -name '*.json' | sort); do
+            echo "::group::$f"; cat "$f"; echo; echo "::endgroup::"
+          done

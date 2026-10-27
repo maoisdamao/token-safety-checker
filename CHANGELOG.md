@@ -4,6 +4,21 @@ All notable changes to token-safety-checker are documented here.
 
 ---
 
+## [3.0.1] - 2026-10-28
+
+Packaging and branding release; scanner behaviour is unchanged from 3.0.0.
+
+### Changed
+- **New logo**: a robot head with a scanner-eye visor and a zipped mouth — "agents talk, secrets don't". Replaces the SafeClaw crab in the README and is the Claude plugin icon (1024×1024, no embedded metadata)
+- The skill now lives in `plugins/tightlip/`, the single folder published to both ClawHub and the Claude plugin marketplace — the package contains only the skill (no CI, tests, docs or images)
+- Rotation hints are plain navigation text; `safeclaw.py` contains no URLs and makes no network calls (cleared a Claude directory policy hold)
+- Removed the old crab images (`assets/safeclaw.png`, `assets/safeclaw_anim.gif`)
+
+### Added
+- `ClawHub scan report` workflow: prints a version's ClawHub publication + security-scan status (Actions → ClawHub scan report → Run workflow)
+
+---
+
 ## [3.0.0] - 2026-10-25
 
 **tightlip** — v3 takes secrets out of agent memory, not just config. Same skill on ClawHub
