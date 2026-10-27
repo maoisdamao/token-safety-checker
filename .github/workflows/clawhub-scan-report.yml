@@ -50,3 +50,19 @@ jobs:
           for f in $(find . -type f -name '*.json' | sort); do
             echo "::group::$f"; cat "$f"; echo; echo "::endgroup::"
           done
+      - name: Findings summary
+        run: |
+          cd report 2>/dev/null || exit 0
+          python3 - <<'PY'
+          import json, glob
+          for f in sorted(glob.glob("*.json")):
+              try: d = json.load(open(f))
+              except Exception: continue
+              if not isinstance(d, dict): print(f"== {f}: {d}"); continue
+              keys = {k: d.get(k) for k in ("status","verdict","severity","score","recommendation","summary","guidance") if k in d}
+              print(f"== {f}: {json.dumps(keys, ensure_ascii=False)[:1500]}")
+              for x in d.get("findings") or []:
+                  print("  - [%s] %s %s | %s:%s | %s | %s" % (x.get("severity"), x.get("issueId") or x.get("code"), x.get("category",""),
+                        x.get("file"), x.get("startLine"), (x.get("pattern") or x.get("title") or "")[:160],
+                        (x.get("explanation") or x.get("message") or "")[:400].replace("\n"," ")))
+          PY
