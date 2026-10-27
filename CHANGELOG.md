@@ -4,6 +4,26 @@ All notable changes to token-safety-checker are documented here.
 
 ---
 
+## [3.0.2] - 2026-10-28
+
+Security hardening from the ClawHub review of 3.0.1 (ClawScan: "migration can leave passwords and tokens readable
+by other users").
+
+### Security
+- `migrate` no longer writes secret values into the shell profile. They go to a dedicated private secrets file
+  (`~/.openclaw/tightlip.env`, or `tightlip.fish`), opened with mode 600 and fixed to 600 *before* any value is written;
+  the profile only gets one line that loads it (`--no-profile` to skip, `--secrets-file` / `--profile` to choose paths).
+  `--secure-profile` is obsolete
+- All rewrites (config, Claude settings, hook script, restore) go through exclusive private temp files (`mkstemp`) —
+  no predictable names, no window with default permissions
+- Config and settings backups are created exclusively with mode 600 instead of copied then chmod-ed
+- `install-guard` requires an explicit `--platform claude|openclaw|all` (no auto-detection for persistent hooks)
+- `verify` checks the secrets file is private and flags secrets left in a readable profile by older versions
+- SKILL.md declares the read-only commands it runs (`allowed-tools`: scan, memory, verify); no bypass hints
+  (`--no-verify`) in messages
+
+---
+
 ## [3.0.1] - 2026-10-28
 
 Packaging and branding release; scanner behaviour is unchanged from 3.0.0.

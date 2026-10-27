@@ -134,9 +134,10 @@ def test_migrate_end_to_end(home):
 
     dry = run(home, "migrate", "--findings", findings, "--dry-run")
     assert dry.returncode == 0 and "[DRY RUN] No files modified." in dry.stdout
+    assert not (home / ".openclaw" / "tightlip.env").exists()
     assert_no_secrets(dry.stdout + dry.stderr, Fake.gateway, Fake.openai)
 
-    r = run(home, "migrate", "--findings", findings, "--secure-profile")
+    r = run(home, "migrate", "--findings", findings)
     assert r.returncode == 0, r.stderr
     assert_no_secrets(r.stdout + r.stderr, Fake.gateway, Fake.openai)
     data = json.loads(cfg.read_text())
@@ -145,11 +146,61 @@ def test_migrate_end_to_end(home):
     assert data["gateway"]["auth"]["token"]["id"] == "OPENCLAW_GATEWAY_TOKEN"
     assert cfg.read_text().startswith("{\n  \"")                    # indentation preserved (2)
     assert mode(cfg) == 0o600
+
+    # Secret values live only in a private secrets file — never in the (world-readable) profile
+    secrets = home / ".openclaw" / "tightlip.env"
+    assert mode(secrets) == 0o600
+    assert f"export OPENCLAW_GATEWAY_TOKEN='{Fake.gateway}'" in secrets.read_text()
     profile = (home / ".bashrc").read_text()
-    assert f"export OPENCLAW_GATEWAY_TOKEN='{Fake.gateway}'" in profile
-    assert mode(home / ".bashrc") == 0o600
+    assert_no_secrets(profile, Fake.gateway, Fake.openai)
+    assert "token-safety-checker secrets" in profile and str(secrets) in profile
+    assert mode(home / ".bashrc") == 0o644                         # untouched permissions, holds no secret
+    # The loader line really exports the variables
+    out = subprocess.run(["bash", "-c", f"set -e; . {home / '.bashrc'}; test \"$OPENCLAW_GATEWAY_TOKEN\" = '{Fake.gateway}'"],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+
     backups = list((home / ".openclaw").glob("openclaw.json.bak-*"))
     assert len(backups) == 1 and mode(backups[0]) == 0o600
+    # Atomic writes leave no temp files behind
+    assert not [p for p in (home / ".openclaw").iterdir() if p.name.endswith(".tmp")]
+
+    # Second run: loader line is not duplicated
+    write_cfg(home, {"b": {"token": Fake.discord}})
+    assert run(home, "migrate", "--findings", scan_findings(home)).returncode == 0
+    assert (home / ".bashrc").read_text().count("token-safety-checker secrets") == 1
+
+
+def test_migrate_fixes_secrets_file_permissions_before_writing(home):
+    write_cfg(home, {"gateway": {"auth": {"token": Fake.gateway}}})
+    secrets = home / ".openclaw" / "tightlip.env"
+    secrets.write_text("# mine\n")
+    os.chmod(secrets, 0o644)
+    r = run(home, "migrate", "--findings", scan_findings(home))
+    assert r.returncode == 0, r.stderr
+    assert mode(secrets) == 0o600 and secrets.read_text().startswith("# mine")
+
+
+def test_migrate_no_profile_and_custom_secrets_file(home, tmp_path):
+    write_cfg(home, {"gateway": {"auth": {"token": Fake.gateway}}})
+    (home / ".bashrc").write_text("# untouched\n")
+    custom = tmp_path / "vault" / "agent.env"
+    r = run(home, "migrate", "--findings", scan_findings(home), "--no-profile", "--secrets-file", str(custom))
+    assert r.returncode == 0, r.stderr
+    assert (home / ".bashrc").read_text() == "# untouched\n"
+    assert mode(custom) == 0o600 and mode(custom.parent) == 0o700
+
+
+def test_migrate_fish_secrets_file(home):
+    write_cfg(home, {"gateway": {"auth": {"token": Fake.gateway}}})
+    fish = home / ".config" / "fish" / "config.fish"
+    fish.parent.mkdir(parents=True)
+    fish.write_text("")
+    r = run(home, "migrate", "--findings", scan_findings(home), "--profile", str(fish))
+    assert r.returncode == 0, r.stderr
+    sec = home / ".openclaw" / "tightlip.fish"
+    assert f"set -gx OPENCLAW_GATEWAY_TOKEN '{Fake.gateway}'" in sec.read_text()
+    assert "; and source" in fish.read_text()
 
 
 def test_migrate_profile_conflict_and_exact_match(home):

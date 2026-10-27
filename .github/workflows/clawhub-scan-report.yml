@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      VERSION: ${{ inputs.version || '3.0.1' }}
+      VERSION: ${{ inputs.version || '3.0.2' }}
       SLUG: token-safety-checker
       API: https://clawhub.ai/api/v1
       CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}

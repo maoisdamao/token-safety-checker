@@ -19,7 +19,8 @@ Subcommands:
 
   migrate         Migrate plaintext secrets in openclaw.json to env vars + SecretRef.
                   Reads secret values directly from the config file — never via CLI args.
-                  Automatically runs verify after a successful migration.
+                  Secrets go to a private secrets file (mode 600); the shell profile only gets
+                  a line that loads it. A read-only verify follows a successful migration.
 
   verify          Post-migration health check (plaintext left, permissions, env vars, backups).
 
@@ -34,10 +35,10 @@ Subcommands:
 Usage:
   python3 safeclaw.py scan    [--config PATH] [--deep] [--memory]
   python3 safeclaw.py memory  [--platform auto|openclaw|claude|all] [--project DIR] [--no-transcripts]
-  python3 safeclaw.py migrate --findings '[...]' [--config PATH] [--profile PATH] [--dry-run] [--secure-profile]
+  python3 safeclaw.py migrate --findings '[...]' [--config PATH] [--secrets-file PATH] [--profile PATH | --no-profile] [--dry-run]
   python3 safeclaw.py migrate --restore [--backup PATH] | --list-backups
   python3 safeclaw.py verify  [--config PATH] [--clean-backup]
-  python3 safeclaw.py install-guard   [--platform auto|openclaw|claude|all] [--scope memory|all]
+  python3 safeclaw.py install-guard   --platform openclaw|claude|all [--scope memory|all]
   python3 safeclaw.py uninstall-guard [--platform auto|openclaw|claude|all]
 
 Exit codes:
@@ -62,11 +63,12 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-VERSION = "3.0.1"
+VERSION = "3.0.2"
 
-# ── Constants ──────────────────────────────────────────────────────────────────
+# -- Constants ---
 
 SENSITIVE_KEYS = {"token", "apikey", "key", "password", "secret", "credential",
                   "authorization", "bearer"}
@@ -120,7 +122,7 @@ SHELL_PROFILES = {
 RISK_ICON = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}
 RISK_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
-# ── Value-based secret detectors (used for memory, transcripts, guard, config) ─
+# -- Value-based secret detectors (used for memory, transcripts, guard, config) ─
 # (name, regex, risk, capture group holding the secret)
 DETECTORS = [
     ("private-key",        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----", "HIGH", 0),
@@ -157,7 +159,7 @@ ROTATE_HINTS = {
     "discord-bot-token":  "Discord Developer Portal → your app → Bot → Reset Token",
     "telegram-bot-token": "Message @BotFather → /revoke",
     "google-api-key":     "Regenerate in Google Cloud Console → APIs & Services → Credentials",
-    "huggingface-token":  "Hugging Face → Settings → Access Tokens: invalidate it",
+    "huggingface-token":  "Hugging Face → Settings → Tokens: invalidate it",
     "private-key":        "Generate a new key pair and remove the old public key everywhere it is trusted",
 }
 ROTATE_DEFAULT = "Rotate this credential at its provider — it has already been sent to a model provider"
@@ -172,7 +174,7 @@ TEXT_SUFFIXES = {".md", ".txt", ".json", ".jsonl", ".log", ".yaml", ".yml"}
 
 GUARD_MARKER = "token-safety-guard"
 
-# ── Generic helpers ────────────────────────────────────────────────────────────
+# -- Generic helpers ---
 
 def home() -> Path:
     return Path.home()
@@ -218,15 +220,40 @@ def now_stamp() -> str:
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
-def atomic_write_text(path: Path, text: str, mode: int | None = None):
-    tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-    if mode is not None:
+def atomic_write_bytes(path: Path, data: bytes, mode: int = 0o600):
+    """Write via an exclusive, private (0600) temp file in the same directory, then rename into place."""
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
         os.chmod(tmp, mode)
-    os.replace(tmp, path)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
-# ── Secret detection ───────────────────────────────────────────────────────────
+
+def atomic_write_text(path: Path, text: str, mode: int | None = None):
+    atomic_write_bytes(path, text.encode("utf-8"), 0o600 if mode is None else mode)
+
+
+def unique_path(p: Path) -> Path:
+    if not p.exists():
+        return p
+    n = 1
+    while p.with_name(f"{p.name}-{n}").exists():
+        n += 1
+    return p.with_name(f"{p.name}-{n}")
+
+
+def private_copy(src: Path, dst: Path):
+    """Copy src to a new file dst that is created exclusively with mode 0600 (never readable by others)."""
+    fd = os.open(str(dst), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(src.read_bytes())
+
+# -- Secret detection ---
 
 def detect_secrets(text: str, known: dict | None = None) -> list:
     """
@@ -276,7 +303,7 @@ def detect_secrets(text: str, known: dict | None = None) -> list:
     accepted.sort(key=lambda h: h["start"])
     return accepted
 
-# ── Config helpers ─────────────────────────────────────────────────────────────
+# -- Config helpers ---
 
 def openclaw_state_dir() -> Path:
     env = os.environ.get("OPENCLAW_STATE_DIR")
@@ -409,14 +436,44 @@ def set_nested(d, dot_path: str, value):
     d[tokens[-1]] = value
 
 
+SECRETS_MARKER = "token-safety-checker secrets"
+
+
+def default_secrets_file(shell_name: str) -> Path:
+    """Dedicated private file for migrated secrets (never the shell profile itself)."""
+    return openclaw_state_dir() / ("tightlip.fish" if shell_name == "fish" else "tightlip.env")
+
+
+def profile_source_line(shell_name: str, secrets_path: Path) -> str:
+    q = shlex.quote(str(secrets_path))
+    if shell_name == "fish":
+        return f"test -f {q}; and source {q}  # {SECRETS_MARKER}"
+    return f"[ -f {q} ] && . {q}  # {SECRETS_MARKER}"
+
+
+def append_private(path: Path, text: str):
+    """Append to a file that is (and stays) private: created 0600, permissions fixed before any write."""
+    if not path.parent.exists():
+        path.parent.mkdir(parents=True, mode=0o700)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(str(path), flags, 0o600)
+    try:
+        if stat.S_IMODE(os.fstat(fd).st_mode) & 0o077:
+            os.fchmod(fd, 0o600)
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
+
+
 def detect_shell() -> dict:
     shell_name = Path(os.environ.get("SHELL", "bash")).name
     candidates = SHELL_PROFILES.get(shell_name, SHELL_PROFILES["bash"])
     profile = next((p for p in candidates if Path(p).expanduser().exists()), candidates[0])
     return {
-        "name":       shell_name,
-        "profile":    profile,
-        "source_cmd": f"source {profile}",
+        "name":         shell_name,
+        "profile":      profile,
+        "secrets_file": tilde(default_secrets_file(shell_name)),
+        "source_cmd":   f"source {profile}",
     }
 
 
@@ -537,7 +594,7 @@ def config_known_secrets(config) -> dict:
                 known[v] = f"${ref['id']}"
     return known
 
-# ── Git history scan ───────────────────────────────────────────────────────────
+# -- Git history scan ---
 
 def scan_git_history(config_path: Path) -> dict:
     """
@@ -608,7 +665,7 @@ def scan_git_history(config_path: Path) -> dict:
             })
     return result
 
-# ── Memory targets ─────────────────────────────────────────────────────────────
+# -- Memory targets ---
 
 def _target(platform, scope, path, kind="text"):
     return {"platform": platform, "scope": scope, "path": Path(path), "kind": kind}
@@ -757,7 +814,7 @@ def resolve_platforms(choice: str, state_dir: Path, cfg: Path, project: Path | N
         found.append("claude")
     return found
 
-# ── Memory scan ────────────────────────────────────────────────────────────────
+# -- Memory scan ---
 
 def _iter_text_records(target):
     """Yield (location, text) for a target. Location is a line number or 'table:rowid'."""
@@ -850,8 +907,8 @@ def scan_memory(platforms: list, state_dir: Path, cfg: Path, project: Path | Non
                 if t["scope"] not in rec["scopes"]:
                     rec["scopes"].append(t["scope"])
                 if len(rec["locations"]) < 10:
-                    rec["locations"].append({"platform": t["platform"], "scope": t["scope"],
-                                             "file": tilde(t["path"]), "line": loc})
+                    loc_rec = {"platform": t["platform"], "scope": t["scope"], "file": tilde(t["path"]), "line": loc}
+                    rec["locations"].append(loc_rec)
 
     out = sorted(secrets.values(),
                  key=lambda r: (RISK_ORDER[r["risk"]], r["live_match"] is None, -r["occurrences"]))
@@ -893,7 +950,7 @@ def scan_memory(platforms: list, state_dir: Path, cfg: Path, project: Path | Non
 
 def print_memory_summary(mem: dict):
     s = mem["summary"]
-    print(f"\n── Memory scan: {mem['files_scanned']} file(s), platforms: {', '.join(mem['platforms']) or 'none'}",
+    print(f"\n-- Memory scan: {mem['files_scanned']} file(s), platforms: {', '.join(mem['platforms']) or 'none'}",
           file=sys.stderr)
     if not mem["secrets"]:
         print("    ✅ No secrets found in agent memory or transcripts", file=sys.stderr)
@@ -911,7 +968,7 @@ def print_memory_summary(mem: dict):
     print("\n    ⚠️  Rotate these credentials — memory and transcripts are sent to the model provider.",
           file=sys.stderr)
 
-# ── Shell profile helpers ──────────────────────────────────────────────────────
+# -- Shell profile helpers ---
 
 def validate_env_var(name: str) -> str:
     if not ENV_VAR_RE.match(name):
@@ -976,16 +1033,17 @@ def backup_has_plaintext(path: Path) -> bool:
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return False
 
-# ── Verify ─────────────────────────────────────────────────────────────────────
+# -- Verify ---
 
-def run_verify(config_path: Path, clean_backup: bool = False, profile: str | None = None) -> int:
+def run_verify(config_path: Path, clean_backup: bool = False, profile: str | None = None,
+               secrets_file: str | None = None) -> int:
     """
     Run post-migration health checks. Returns 0 if all clear, 1 if issues found.
     """
     issues = []
     ok = []
 
-    print("\n── SafeClaw Verify ──────────────────────────────────────────")
+    print("\n-- SafeClaw Verify ---")
 
     if not config_path.exists():
         print(f"[ERROR] Config not found: {config_path}", file=sys.stderr)
@@ -1027,13 +1085,18 @@ def run_verify(config_path: Path, clean_backup: bool = False, profile: str | Non
     elif not refs:
         ok.append("  ✅ No SecretRefs found (nothing to check)")
 
-    # 4. Shell profile permissions (it now holds secrets)
-    prof = Path(profile or detect_shell()["profile"]).expanduser()
+    # 4. Where the secret values live: private secrets file; older versions wrote them into the profile
+    shell = detect_shell()
+    sec = Path(secrets_file).expanduser() if secrets_file else default_secrets_file(shell["name"])
+    if sec.is_file() and not is_private(sec):
+        issues.append(f"  🟡 [MEDIUM] secrets file {tilde(sec)} is readable by others — run: chmod 600 {sec}")
+    prof = Path(profile or shell["profile"]).expanduser()
     if prof.is_file() and env_refs:
         exports = profile_exports(prof.read_text(encoding="utf-8", errors="replace"))
         if any(r in exports for r in env_refs) and not is_private(prof):
-            issues.append(f"  🟡 [MEDIUM] {tilde(prof)} holds secrets but is readable by others "
-                          f"({oct(mode_of(prof))[2:]}) — run: chmod 600 {prof}")
+            issues.append(f"  🟡 [MEDIUM] {tilde(prof)} holds secrets (written by an older version) and is readable "
+                          f"by others ({oct(mode_of(prof))[2:]}) — move those export lines into {tilde(sec)} "
+                          f"(chmod 600), or run: chmod 600 {prof}")
 
     # 5. Backup files still holding plaintext (ours + OpenClaw's own rotating .bak files)
     ours = list_backups(config_path, ours_only=True)
@@ -1064,7 +1127,7 @@ def run_verify(config_path: Path, clean_backup: bool = False, profile: str | Non
     print("\n  🦀 All checks passed — your config looks clean!\n")
     return 0
 
-# ── Guard (leak prevention) ────────────────────────────────────────────────────
+# -- Guard (leak prevention) ---
 
 def is_memory_path(file_path: str) -> bool:
     p = file_path.replace("\\", "/")
@@ -1121,7 +1184,7 @@ def cmd_guard_hook(args):
 
 
 def cmd_guard_git(args):
-    """git pre-commit hook: block commits that add secrets. Bypass with git commit --no-verify."""
+    """git pre-commit hook: block commits that add secrets."""
     r = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"],
                        capture_output=True)
     if r.returncode != 0:
@@ -1141,7 +1204,7 @@ def cmd_guard_git(args):
     for name, lineno, det, fp in blocked[:20]:
         print(f"    {name}:{lineno}  {det}  {fp}", file=sys.stderr)
     print("  Move the secret out of the workspace (env var / secret manager), then commit again.\n"
-          "  If this is a false positive: git commit --no-verify", file=sys.stderr)
+          "  To remove this guard: safeclaw.py uninstall-guard --platform openclaw", file=sys.stderr)
     return 1
 
 
@@ -1155,8 +1218,7 @@ def _guard_script_dest_openclaw(state_dir: Path) -> Path:
 
 def _install_script_copy(dest: Path):
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(Path(__file__).resolve(), dest)
-    os.chmod(dest, 0o700)
+    atomic_write_bytes(dest, Path(__file__).resolve().read_bytes(), 0o700)
 
 
 def _strip_guard_hooks(settings: dict) -> int:
@@ -1192,7 +1254,7 @@ def install_guard_claude(cfg: Path, scope: str, settings_path: Path | None) -> s
     dest = _guard_script_dest_claude(cfg)
     _install_script_copy(dest)
     if settings_path.exists():
-        shutil.copy2(settings_path, settings_path.with_name(settings_path.name + f".bak-{now_stamp()}"))
+        private_copy(settings_path, unique_path(settings_path.with_name(settings_path.name + f".bak-{now_stamp()}")))
     _strip_guard_hooks(settings)
     settings.setdefault("hooks", {}).setdefault("PreToolUse", []).append({
         "matcher": "Write|Edit|MultiEdit|NotebookEdit",
@@ -1223,7 +1285,7 @@ def uninstall_guard_claude(cfg: Path, settings_path: Path | None) -> str:
 
 GIT_HOOK_TEMPLATE = """#!/bin/sh
 # {marker}: installed by token-safety-checker (safeclaw.py install-guard)
-# Blocks commits that contain secrets. Bypass once with: git commit --no-verify
+# Blocks commits that contain secrets. Remove with: safeclaw.py uninstall-guard --platform openclaw
 exec python3 "{script}" guard-git
 """
 
@@ -1260,7 +1322,7 @@ def uninstall_guard_openclaw(state_dir: Path, config) -> list:
         dest.unlink()
     return msgs or ["[OK] OpenClaw: no guard hooks found"]
 
-# ── Subcommands ────────────────────────────────────────────────────────────────
+# -- Subcommands ---
 
 def _try_load_config(config_path: Path):
     if not config_path.exists():
@@ -1356,7 +1418,7 @@ def cmd_memory(args):
 def cmd_migrate(args):
     config_path = Path(args.config).expanduser()
 
-    # ── Backup listing / restore ──────────────────────────────────────────────
+    # -- Backup listing / restore ---
     if args.list_backups:
         backups = list_backups(config_path)
         if not backups:
@@ -1377,7 +1439,7 @@ def cmd_migrate(args):
         if src is None or not src.exists():
             print(f"[ERROR] No backup found for {config_path}", file=sys.stderr)
             sys.exit(1)
-        shutil.copy2(src, config_path)
+        atomic_write_bytes(config_path, src.read_bytes(), mode_of(config_path) if config_path.exists() else 0o600)
         print(f"[OK] Restored {config_path} from {src}")
         return
 
@@ -1424,17 +1486,26 @@ def cmd_migrate(args):
                   file=sys.stderr)
             sys.exit(1)
 
-    profile_path = Path(args.profile or detect_shell()["profile"]).expanduser()
     shell_name = Path(os.environ.get("SHELL", "bash")).name
+    profile_path = Path(args.profile or detect_shell()["profile"]).expanduser()
     if profile_path.name == "config.fish":
         shell_name = "fish"
-    profile_content = profile_path.read_text(encoding="utf-8") if profile_path.exists() else ""
-    existing = profile_exports(profile_content)
+    secrets_path = Path(args.secrets_file).expanduser() if args.secrets_file else default_secrets_file(shell_name)
+    # Existing exports: the secrets file, plus the profile for exports written by older versions
+    existing = {}
+    for src in (profile_path, secrets_path):
+        if src.is_file():
+            existing.update(profile_exports(src.read_text(encoding="utf-8", errors="replace")))
+    profile_text = profile_path.read_text(encoding="utf-8", errors="replace") if profile_path.exists() else ""
+    hook_line = profile_source_line(shell_name, secrets_path)
+    needs_hook = not args.no_profile and SECRETS_MARKER not in profile_text
 
     print(f"\n{'[DRY RUN] ' if args.dry_run else ''}Migration plan:")
     print(f"  config  : {config_path}")
-    print(f"  backup  : {config_path.name}.bak-<timestamp>")
-    print(f"  profile : {profile_path}")
+    print(f"  backup  : {config_path.name}.bak-<timestamp> (mode 600)")
+    print(f"  secrets : {secrets_path} (mode 600)")
+    print(f"  profile : {profile_path} (" + ("adds one line that loads the secrets file — no secrets"
+          if needs_hook else "unchanged") + ")")
     print()
 
     vars_to_add = []
@@ -1443,80 +1514,78 @@ def cmd_migrate(args):
         value = get_nested(config, f["path"])
         if env_var in existing:
             if existing[env_var] != value:
-                print(f"[ERROR] {env_var} is already exported in {profile_path} with a DIFFERENT value. "
-                      f"Rename the env_var for {f['path']}, or remove the old line if you rotated the token.",
-                      file=sys.stderr)
+                print(f"[ERROR] {env_var} is already exported (in {tilde(secrets_path)} or {tilde(profile_path)}) "
+                      f"with a DIFFERENT value. Rename the env_var for {f['path']}, or remove the old line if you "
+                      f"rotated the token.", file=sys.stderr)
                 sys.exit(1)
-            print(f"  [profile =] {env_var} already present with the same value, skipping")
+            print(f"  [secrets =] {env_var} already present with the same value, skipping")
         elif env_var not in vars_to_add:
             vars_to_add.append(env_var)
-            print(f"  [profile +] {export_line(shell_name, env_var, '***')}")
+            print(f"  [secrets +] {export_line(shell_name, env_var, '***')}")
         if os.environ.get(env_var) not in (None, value):
             print(f"  [warn     ] ${env_var} is currently set to a different value in this shell")
         print(f"  [config  →] {f['path']}  →  SecretRef({env_var})")
-
-    if profile_path.exists() and not is_private(profile_path):
-        action = "will chmod 600" if args.secure_profile else "consider --secure-profile (chmod 600)"
-        print(f"\n  [perm     ] {tilde(profile_path)} is {oct(mode_of(profile_path))[2:]} — readable by others; {action}")
+    if needs_hook:
+        print(f"  [profile +] {hook_line}")
+    if secrets_path.exists() and not is_private(secrets_path):
+        print(f"  [perm     ] {tilde(secrets_path)} is {oct(mode_of(secrets_path))[2:]} — will be set to 600 before writing")
+    if args.secure_profile:
+        print("  [note     ] --secure-profile is no longer needed: secrets are never written to the shell profile")
 
     if args.dry_run:
         print("\n[DRY RUN] No files modified.")
         return
 
-    # 1. Backup (timestamped, private, never overwritten)
-    bak_path = config_path.with_name(f"{config_path.name}.bak-{now_stamp()}")
-    n = 1
-    while bak_path.exists():
-        bak_path = config_path.with_name(f"{config_path.name}.bak-{now_stamp()}-{n}")
-        n += 1
-    shutil.copy2(config_path, bak_path)
-    os.chmod(bak_path, 0o600)
+    # 1. Backup (timestamped, created private, never overwritten)
+    bak_path = unique_path(config_path.with_name(f"{config_path.name}.bak-{now_stamp()}"))
+    private_copy(config_path, bak_path)
     print(f"\n[OK] Backup: {bak_path}")
 
-    # 2. Write shell profile
+    # 2. Secrets → private secrets file (0600 before the first byte is written)
     if vars_to_add:
-        new_file = not profile_path.exists()
-        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = [f"\n# Added by token-safety-checker v{VERSION} ({datetime.date.today()})"]
         written = set()
-        with open(profile_path, "a", encoding="utf-8") as pf:
-            pf.write(f"\n# Added by token-safety-checker v{VERSION} ({datetime.date.today()})\n")
-            for f in to_migrate:
-                if f["env_var"] in vars_to_add and f["env_var"] not in written:
-                    value = get_nested(config, f["path"])
-                    if value and isinstance(value, str):
-                        pf.write(export_line(shell_name, f["env_var"], value) + "\n")
-                        written.add(f["env_var"])
-        if new_file:
-            os.chmod(profile_path, 0o600)
-        print(f"[OK] Wrote {len(written)} export(s) to {profile_path}")
-    if args.secure_profile and profile_path.exists() and not is_private(profile_path):
-        os.chmod(profile_path, 0o600)
-        print(f"[OK] chmod 600 {profile_path}")
+        for f in to_migrate:
+            if f["env_var"] in vars_to_add and f["env_var"] not in written:
+                value = get_nested(config, f["path"])
+                if value and isinstance(value, str):
+                    lines.append(export_line(shell_name, f["env_var"], value))
+                    written.add(f["env_var"])
+        append_private(secrets_path, "\n".join(lines) + "\n")
+        print(f"[OK] Wrote {len(lines) - 1} secret(s) to {secrets_path} (mode 600)")
 
-    # 3. Update config with SecretRefs (atomic, keeps permissions + indentation)
+    # 3. Profile gets only the loader line (no secret values)
+    if needs_hook:
+        with open(profile_path, "a", encoding="utf-8") as pf:
+            pf.write(f"\n{hook_line}\n")
+        print(f"[OK] {profile_path}: added a line that loads {secrets_path}")
+
+    # 4. Update config with SecretRefs (atomic, private temp file, keeps permissions + indentation)
     for f in to_migrate:
         set_nested(config, f["path"], {"source": "env", "provider": "default", "id": f["env_var"]})
     write_config(config_path, config, indent)
     print(f"[OK] Updated {config_path} with {len(to_migrate)} SecretRef(s)")
 
     print(f"""
-[!] Next steps — source your profile before restarting:
+[!] Next steps — load the secrets in this shell, then restart the gateway:
 
-    source {profile_path}
+    source {secrets_path}
     openclaw gateway restart
 
-    systemd: add vars to EnvironmentFile= in your unit instead of sourcing profile.
-    Docker:  pass via -e or environment: in compose.
+    New shells load it automatically{" via " + str(profile_path) if needs_hook or SECRETS_MARKER in profile_text else ""}.
+    systemd: put the variables in your unit's EnvironmentFile= (KEY=value lines, without `export`).
+    Docker:  pass them via -e or environment: in compose.
 """)
 
-    print("── Running post-migration verify ──────────────────────────────")
-    print("   (env var checks may show NOT SET until you source your profile)")
-    run_verify(config_path, clean_backup=False, profile=str(profile_path))
+    print("-- Running post-migration verify ---")
+    print("   (env var checks may show NOT SET until you source the secrets file)")
+    run_verify(config_path, clean_backup=False, profile=str(profile_path), secrets_file=str(secrets_path))
 
 
 def cmd_verify(args):
     config_path = Path(args.config).expanduser()
-    sys.exit(run_verify(config_path, clean_backup=args.clean_backup, profile=args.profile))
+    sys.exit(run_verify(config_path, clean_backup=args.clean_backup, profile=args.profile,
+                        secrets_file=args.secrets_file))
 
 
 def _guard_platforms(args):
@@ -1550,7 +1619,7 @@ def cmd_uninstall_guard(args):
         for m in uninstall_guard_openclaw(state_dir, config):
             print(m)
 
-# ── Entry point ────────────────────────────────────────────────────────────────
+# -- Entry point ---
 
 def _add_memory_args(p):
     p.add_argument("--platform", choices=["auto", "openclaw", "claude", "all"], default="auto",
@@ -1583,9 +1652,12 @@ def main():
     p_mig = sub.add_parser("migrate", help="Migrate secrets to env vars + SecretRef")
     p_mig.add_argument("--findings", help="JSON list from scan output")
     p_mig.add_argument("--config", default=cfg_default)
-    p_mig.add_argument("--profile", default=None)
+    p_mig.add_argument("--profile", default=None, help="Shell profile that gets the line loading the secrets file")
+    p_mig.add_argument("--secrets-file", default=None,
+                       help="Private file for the migrated secrets (default: ~/.openclaw/tightlip.env, mode 600)")
+    p_mig.add_argument("--no-profile", action="store_true", help="Do not touch the shell profile")
     p_mig.add_argument("--dry-run", action="store_true")
-    p_mig.add_argument("--secure-profile", action="store_true", help="chmod 600 the shell profile")
+    p_mig.add_argument("--secure-profile", action="store_true", help=argparse.SUPPRESS)  # obsolete since 3.0.2
     p_mig.add_argument("--restore", action="store_true", help="Restore config from the newest backup")
     p_mig.add_argument("--backup", default=None, help="With --restore: restore this backup file")
     p_mig.add_argument("--list-backups", action="store_true", help="List available backups")
@@ -1593,12 +1665,17 @@ def main():
     p_ver = sub.add_parser("verify", help="Post-migration health check")
     p_ver.add_argument("--config", default=cfg_default)
     p_ver.add_argument("--profile", default=None)
+    p_ver.add_argument("--secrets-file", default=None)
     p_ver.add_argument("--clean-backup", action="store_true", help="Delete backup files if found")
 
     for name, helptext in (("install-guard", "Install leak-prevention hooks"),
                            ("uninstall-guard", "Remove leak-prevention hooks")):
         p = sub.add_parser(name, help=helptext)
-        p.add_argument("--platform", choices=["auto", "openclaw", "claude", "all"], default="auto")
+        if name == "install-guard":
+            # Persistent hooks: the user must name the platform(s) explicitly — no auto-detection
+            p.add_argument("--platform", choices=["openclaw", "claude", "all"], required=True)
+        else:
+            p.add_argument("--platform", choices=["auto", "openclaw", "claude", "all"], default="auto")
         p.add_argument("--scope", choices=["memory", "all"], default="memory",
                        help="Claude Code: guard memory/instruction files only (default) or every file write")
         p.add_argument("--settings", default=None, help="Claude Code settings.json to edit (default: user settings)")
