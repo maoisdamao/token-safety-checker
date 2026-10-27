@@ -2,7 +2,8 @@
 name: token-safety-checker
 description: Find and fix leaked API keys, tokens and passwords in your AI agent's config, long/short-term memory and session transcripts (OpenClaw + Claude Code). Use when the user asks to check token or secret safety, scan for leaked credentials, audit agent memory, MEMORY.md, CLAUDE.md or chat history for secrets, move plaintext tokens in openclaw.json to env vars, or stop secrets from being written into memory. Also use after editing openclaw.json or when setting up a new OpenClaw instance. Secret values are never printed.
 license: MIT
-metadata: {"author": "maoisdamao", "version": "3.0.1", "homepage": "https://github.com/maoisdamao/token-safety-checker", "openclaw": {"emoji": "🔐", "homepage": "https://github.com/maoisdamao/token-safety-checker", "requires": {"bins": ["python3"]}}}
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/safeclaw.py scan *), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/safeclaw.py memory *), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/safeclaw.py verify *)
+metadata: {"author": "maoisdamao", "version": "3.0.2", "homepage": "https://github.com/maoisdamao/token-safety-checker", "openclaw": {"emoji": "🔐", "homepage": "https://github.com/maoisdamao/token-safety-checker", "requires": {"bins": ["python3"]}}}
 ---
 
 # Token Safety Checker 🔐 (tightlip)
@@ -43,12 +44,14 @@ On Claude Code without OpenClaw, skip A — there is no openclaw.json.
    `checks.file_permissions` (should be 600) and `checks.format` (JSON5 configs can be scanned, not migrated).
 2. **Confirm**: show a table `path | env_var | risk`. Let the user rename env vars. Do not proceed without a yes.
 3. **Dry run**: `SC migrate --findings '<findings JSON from step 1>' --dry-run` and show the plan.
-   If the shell profile is readable by others, suggest adding `--secure-profile` (chmod 600).
-4. **Migrate**: `SC migrate --findings '<findings JSON>' [--secure-profile]`
-   It re-scans from disk, writes a timestamped private backup (`openclaw.json.bak-<time>`), appends
-   `export` lines to the shell profile (exact-name dedupe; refuses if a var exists with a different value),
-   replaces values with `{"source":"env","provider":"default","id":"VAR"}` and runs `verify`.
-5. **Reload**: shell-launched gateway → `source <profile>` then `openclaw gateway restart`.
+4. **Migrate**: `SC migrate --findings '<findings JSON>'`
+   It re-scans from disk, writes a timestamped backup created with mode 600 (`openclaw.json.bak-<time>`),
+   appends `export` lines to a **private secrets file** (`~/.openclaw/tightlip.env`, mode 600 before any
+   value is written; exact-name dedupe; refuses if a var exists with a different value), adds one line to the
+   shell profile that loads that file (no secret values in the profile; `--no-profile` to skip, `--profile`
+   / `--secrets-file` to choose paths), replaces values with `{"source":"env","provider":"default","id":"VAR"}`
+   and runs the read-only `verify`.
+5. **Reload**: shell-launched gateway → `source ~/.openclaw/tightlip.env` then `openclaw gateway restart`.
    systemd → put the vars in `EnvironmentFile=`. Docker → `-e` / `environment:`.
 6. **Verify**: `SC verify` (exit 0 = clean). `SC verify --clean-backup` deletes backups once rollback is not needed.
 7. **Rollback**: `SC migrate --restore` (newest backup), `SC migrate --list-backups`,
@@ -84,7 +87,8 @@ Report to the user:
 
 ## C. Guard — stop new leaks
 
-`SC install-guard` (auto-detects platforms; `--platform claude|openclaw`).
+`SC install-guard --platform claude|openclaw|all` — the platform must be named explicitly; confirm it with the
+user first, because this installs a persistent hook.
 
 - **Claude Code**: adds a `PreToolUse` hook (`Write|Edit|MultiEdit|NotebookEdit`) to `~/.claude/settings.json`
   that denies writing a detected secret into memory / instruction files (CLAUDE.md, auto memory,
@@ -94,13 +98,13 @@ Report to the user:
 - **OpenClaw**: adds a git `pre-commit` hook to git-backed workspaces that blocks committing secrets.
   An existing non-guard pre-commit hook is never overwritten (manual instructions are printed instead).
 
-Remove with `SC uninstall-guard`.
+Remove with `SC uninstall-guard --platform claude|openclaw|all`.
 
 ## SecretRef format (OpenClaw)
 
 ```json
 { "source": "env",  "provider": "default", "id": "MY_ENV_VAR" }
-{ "source": "file", "provider": "default", "id": "/path/to/secret.txt" }
+{ "source": "file", "provider": "default", "id": "/path/to/token-file" }
 { "source": "exec", "provider": "default", "id": "command --prints --secret" }
 ```
 

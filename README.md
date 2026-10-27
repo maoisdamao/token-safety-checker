@@ -81,7 +81,7 @@ Each unique secret is reported once with its fingerprint, every place it appears
 ### 🛡️ Leak guard
 
 ```
-safeclaw install-guard
+safeclaw install-guard --platform claude   # or openclaw / all
 ```
 
 - ✳️ **Claude Code** — a `PreToolUse` hook denies any Write/Edit that would put a secret into `CLAUDE.md`, auto memory, `.claude/rules` or other memory files. Claude gets a clear reason and writes a `${PLACEHOLDER}` instead.
@@ -92,7 +92,8 @@ Remove anytime with `safeclaw uninstall-guard`.
 ### 🔧 Fixes
 
 Safer `migrate`: list paths, unique env var names, timestamped backups that are never overwritten, exact profile matching,
-JSON5 support, preserved formatting, `--secure-profile`. Full list in [CHANGELOG.md](CHANGELOG.md).
+JSON5 support, preserved formatting. Since 3.0.2 secrets go to a private `~/.openclaw/tightlip.env` (mode 600), never into your
+shell profile. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -102,10 +103,10 @@ JSON5 support, preserved formatting, `--secure-profile`. Full list in [CHANGELOG
 |---|---|
 | `scan [--deep] [--memory]` | Plaintext secrets in `openclaw.json` (+ git history, + memory) |
 | `memory [--platform] [--project] [--no-transcripts]` | Read-only scan of agent memory, transcripts and logs |
-| `migrate --findings '…' [--dry-run] [--secure-profile]` | Config secrets → env vars + SecretRef |
+| `migrate --findings '…' [--dry-run] [--secrets-file F] [--no-profile]` | Config secrets → private secrets file + SecretRef |
 | `migrate --restore [--backup FILE]` · `--list-backups` | Roll back |
 | `verify [--clean-backup]` | Health check: plaintext left, permissions, env vars, leaky backups |
-| `install-guard` · `uninstall-guard` | Leak prevention hooks |
+| `install-guard --platform …` · `uninstall-guard` | Leak prevention hooks |
 
 `safeclaw` = `python3 <skill dir>/scripts/safeclaw.py`. Full agent workflow: [SKILL.md](plugins/tightlip/SKILL.md).
 
@@ -119,7 +120,7 @@ JSON5 support, preserved formatting, `--secure-profile`. Full list in [CHANGELOG
 
 ## ⚖️ Security trade-offs
 
-- `migrate` moves secrets **out of `openclaw.json`** into your **shell profile** — better, but still plaintext on disk. Use `--secure-profile`, or prefer `file` / `exec` SecretRefs (password manager) for higher security.
+- `migrate` moves secrets **out of `openclaw.json`** into a private secrets file (`~/.openclaw/tightlip.env`, mode 600) that your shell profile loads — better, but still plaintext on disk. For higher security prefer `file` / `exec` SecretRefs (password manager).
 - `memory` is **read-only**. It can't un-send a secret that already reached a model provider — **rotate** what it finds. In-place redaction is planned for v3.1.
 - Detection is pattern-based: it can miss custom formats and occasionally flag a false positive. Live-secret matching covers your own config tokens regardless of format.
 - The Claude Code guard covers the Write/Edit tools. A secret written through a shell command is not intercepted — the memory scan catches it afterwards.
@@ -197,7 +198,7 @@ Token 会以明文出现在 `openclaw.json`、`MEMORY.md`、每日笔记、`CLAU
 
 ### 🛡️ 泄露防护
 
-`safeclaw install-guard`：
+`safeclaw install-guard --platform claude`（或 openclaw / all）：
 
 - ✳️ **Claude Code**——`PreToolUse` hook 拦截把密钥写进 `CLAUDE.md`、自动记忆、`.claude/rules` 等记忆文件的操作，Claude 会改写成 `${占位符}`。
 - 🦀 **OpenClaw**——在 workspace 的 git 仓库安装 `pre-commit` hook，阻止提交包含密钥的文件。
@@ -206,11 +207,11 @@ Token 会以明文出现在 `openclaw.json`、`MEMORY.md`、每日笔记、`CLAU
 
 ### 🔧 修复
 
-`migrate` 更安全：支持列表路径、环境变量名不冲突、带时间戳且不会被覆盖的备份、精确匹配 profile、支持 JSON5、保留格式、`--secure-profile`。详见 [CHANGELOG.md](CHANGELOG.md)。
+`migrate` 更安全：支持列表路径、环境变量名不冲突、带时间戳且不会被覆盖的备份、精确匹配 profile、支持 JSON5、保留格式。3.0.2 起密钥写入私有的 `~/.openclaw/tightlip.env`（权限 600），不再写进 shell profile。详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## ⚖️ 安全权衡
 
-- `migrate` 把密钥从 `openclaw.json` 移到 shell profile——更安全，但仍是磁盘上的明文。建议用 `--secure-profile`，或改用 `file` / `exec` 类型的 SecretRef（密码管理器）。
+- `migrate` 把密钥从 `openclaw.json` 移到私有的 `~/.openclaw/tightlip.env`（权限 600，由 shell profile 加载）——更安全，但仍是磁盘上的明文。更高安全要求可改用 `file` / `exec` 类型的 SecretRef（密码管理器）。
 - `memory` 只读。已经发给模型服务商的密钥无法撤回——**请轮换**。原地脱敏（redact）计划在 v3.1 推出。
 - 检测基于规则，可能漏掉自定义格式或偶有误报；与当前配置一致的 token 无论格式都能识别。
 

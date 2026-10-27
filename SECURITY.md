@@ -15,10 +15,9 @@ secrets from AI agent configuration and memory, not to extract or exfiltrate the
 
 ## What this skill writes (only when you run these commands)
 
-- `migrate`: a timestamped `chmod 600` backup of `openclaw.json`, env exports appended to your shell profile, SecretRefs in `openclaw.json`
-- `migrate --secure-profile`: `chmod 600` on your shell profile
+- `migrate`: a timestamped backup of `openclaw.json` (created with mode 600), env exports in a private secrets file (`~/.openclaw/tightlip.env`, mode 600 before any value is written), one non-secret line in your shell profile that loads it, SecretRefs in `openclaw.json`. All rewrites use exclusive, private temp files.
 - `verify --clean-backup`: deletes backups that still contain plaintext secrets
-- `install-guard`: a `PreToolUse` hook in `~/.claude/settings.json` (backup written first) + a copy of the script in `~/.claude/hooks/`; a git `pre-commit` hook in OpenClaw workspaces (never overwrites a hook it did not create)
+- `install-guard --platform …` (platform must be named explicitly): a `PreToolUse` hook in `~/.claude/settings.json` (backup written first) + a copy of the script in `~/.claude/hooks/`; a git `pre-commit` hook in OpenClaw workspaces (never overwrites a hook it did not create)
 
 ## Guarantees
 

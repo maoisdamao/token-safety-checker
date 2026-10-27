@@ -64,7 +64,7 @@ def test_openclaw_end_to_end(home, tmp_path):
     assert any(s["detector"] == "openai-api-key" for s in out["memory"]["secrets"])
     assert_no_secrets(scan.stdout + scan.stderr, Fake.discord, Fake.gateway, Fake.openai)
 
-    mig = run(home, "migrate", "--findings", json.dumps(out["findings"]), "--secure-profile")
+    mig = run(home, "migrate", "--findings", json.dumps(out["findings"]))
     assert mig.returncode == 0, mig.stderr
     assert_no_secrets(mig.stdout + mig.stderr, Fake.discord, Fake.gateway)
 
@@ -113,6 +113,11 @@ def test_script_names_no_remote_host():
     import re
     text = (SKILL_DIR / "scripts" / "safeclaw.py").read_text(encoding="utf-8")
     assert not re.search(r"(?i)\b(?:https?|wss?|ftp)://", text)
+
+
+def test_no_safety_bypass_advice_in_skill():
+    for f in ("SKILL.md", "scripts/safeclaw.py"):
+        assert "--no-verify" not in (SKILL_DIR / f).read_text(encoding="utf-8"), f
 
 
 def test_icon_is_valid_for_directory():

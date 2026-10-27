@@ -92,6 +92,12 @@ def test_install_guard_openclaw_blocks_commit(home, openclaw_home):
     assert not (ws / ".git" / "hooks" / "pre-commit").exists()
 
 
+def test_install_guard_requires_explicit_platform(home, claude_home):
+    r = run(home, "install-guard")
+    assert r.returncode == 2 and "--platform" in r.stderr
+    assert not (claude_home / "settings.json").exists()
+
+
 def test_install_guard_openclaw_respects_foreign_hook(home, openclaw_home):
     ws = openclaw_home / "workspace"
     _git(ws, "init", "-q")

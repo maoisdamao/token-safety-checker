@@ -25,7 +25,7 @@ What it does:
 - **Scans memory** — `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules`, auto memory, prompt history and session
   transcripts (plus OpenClaw memory, transcripts and logs). Read-only.
 - **Flags live secrets** — leaked values that match a token in use right now, with rotation steps.
-- **Guards new writes** (opt-in, `install-guard`) — a `PreToolUse` hook that denies writing a detected secret
+- **Guards new writes** (opt-in, `install-guard --platform claude`) — a `PreToolUse` hook that denies writing a detected secret
   into memory / instruction files. Remove with `uninstall-guard`.
 - **Migrates OpenClaw config secrets** to environment variables (`openclaw.json` → SecretRef).
 

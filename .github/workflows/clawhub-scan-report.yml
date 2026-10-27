@@ -1,7 +1,7 @@
 name: ClawHub scan report
 
 # Prints ClawHub publication + security-scan status for a version into the job log
-# (moderation, owner view of the version, `skill verify`, stored scan archive).
+# (moderation, owner view of the version, `skill verify`, stored scan archive). Default: latest release.
 on:
   workflow_dispatch:
     inputs:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      VERSION: ${{ inputs.version || '3.0.1' }}
+      VERSION: ${{ inputs.version || '3.0.2' }}
       SLUG: token-safety-checker
       API: https://clawhub.ai/api/v1
       CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
@@ -50,3 +50,28 @@ jobs:
           for f in $(find . -type f -name '*.json' | sort); do
             echo "::group::$f"; cat "$f"; echo; echo "::endgroup::"
           done
+      - name: Findings summary
+        run: |
+          cd report 2>/dev/null || exit 0
+          python3 - <<'PY'
+          import json, glob
+          def walk(o, path=""):
+              if isinstance(o, dict):
+                  if "issueId" in o or ("severity" in o and ("file" in o or "explanation" in o)):
+                      print("  - [%s] %s %s | %s:%s | %s | %s" % (o.get("severity"), o.get("issueId",""), o.get("category",""),
+                            o.get("file"), o.get("startLine"), str(o.get("pattern") or o.get("title") or "")[:200],
+                            str(o.get("explanation") or o.get("message") or "")[:500].replace("\n"," ")))
+                      return
+                  for k, v in o.items(): walk(v, f"{path}.{k}")
+              elif isinstance(o, list):
+                  for v in o: walk(v, path)
+          for f in sorted(glob.glob("*.json")):
+              try: d = json.load(open(f))
+              except Exception: continue
+              print(f"== {f}")
+              if isinstance(d, dict):
+                  for k in ("status","verdict","severity","score","recommendation","summary","guidance"):
+                      if k in d: print(f"   {k}: {d[k]}")
+                  if isinstance(d.get("findings"), str): print("   findings (text):\n" + d["findings"])
+                  walk(d)
+          PY
