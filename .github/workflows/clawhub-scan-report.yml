@@ -1,7 +1,7 @@
 name: ClawHub scan report
 
 # Prints ClawHub publication + security-scan status for a version into the job log
-# (moderation, owner view of the version, `skill verify`, stored scan archive). Default: latest release.
+# (moderation, owner view of the version, publish attempts, `skill verify`, stored scan archive).
 on:
   workflow_dispatch:
     inputs:
@@ -36,6 +36,15 @@ jobs:
           for path in "skills/$SLUG/versions/$VERSION" "skills/$SLUG/moderation" "skills/$SLUG"; do
             echo "::group::GET /$path"
             curl -sS -m 30 -H "Authorization: Bearer $CLAWHUB_TOKEN" -H "Accept: application/json" "$API/$path" | head -c 20000; echo
+            echo "::endgroup::"
+          done
+      - name: Version list + publish attempts
+        timeout-minutes: 3
+        run: |
+          echo "::group::versions"; clawhub --no-input inspect "@maoisdamao/$SLUG" --versions --json || true; echo "::endgroup::"
+          for path in "publish/attempts" "publish/attempts?slug=$SLUG" "publish/attempts?name=$SLUG&version=$VERSION" "skills/$SLUG/versions?includePending=true"; do
+            echo "::group::GET /$path"
+            curl -sS -m 30 -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $CLAWHUB_TOKEN" -H "Accept: application/json" "$API/$path" | head -c 8000; echo
             echo "::endgroup::"
           done
       - name: skill verify
